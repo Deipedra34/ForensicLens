@@ -4,8 +4,7 @@ import PackageDescription
 let package = Package(
     name: "forensiclens",
     platforms: [
-        .macOS(.v12),
-        .iOS(.v15)
+        .macOS(.v12)
     ],
     products: [
         .library(

@@ -91,17 +91,17 @@ Requires Swift 5.9+.
 
 ```swift
 dependencies: [
-    .package(path: "../forensiclens") // or a git URL once published
+    .package(url: "https://github.com/Deipedra34/ForensicLens.git", from: "1.0.0")
 ]
 ```
 
-and depend on the `ForensicLens` product from your target.
+and depend on the `ForensicLens` product from your target. If you're working from a local checkout instead, `.package(path: "../forensiclens")` works the same way.
 
 **As a CLI**, build it from source:
 
 ```sh
-git clone <this-repo>
-cd forensiclens
+git clone https://github.com/Deipedra34/ForensicLens.git
+cd ForensicLens
 swift build -c release
 .build/release/forensiclens-cli report path/to/image.bmp
 ```
