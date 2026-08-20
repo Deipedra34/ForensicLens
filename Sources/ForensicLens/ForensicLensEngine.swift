@@ -5,8 +5,8 @@ import ImageDecoding
 /// `ForensicReport`.
 ///
 /// This is what both `forensiclens-cli` and any other consumer of the
-/// `ForensicLens` library should use rather than constructing individual
-/// analyzers by hand -- it's the one place that knows the full set of
+/// `ForensicLens` library should use, rather than constructing individual
+/// analyzers by hand. It's the one place that knows the full set of
 /// registered analyzers and how their per-analyzer `enabled` flags in
 /// `ForensicLensConfig` map to analyzer identifiers.
 public struct ForensicLensEngine: Sendable {

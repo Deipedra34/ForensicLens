@@ -3,37 +3,39 @@ import ImageDecoding
 
 /// Detects copy-pasted ("copy-move") regions within a single image.
 ///
-/// Copy-move forgery -- cloning a patch of an image over another part of
-/// the same image to duplicate or erase something -- is invisible to EXIF
-/// analysis (the file is a single, internally consistent export) and often
-/// invisible to ELA too (the pasted patch shares the exact same compression
-/// history as everything else, because it came from the same image). What
-/// gives it away is that two regions of the picture are near-identical in a
-/// way real photographed scenes essentially never are.
+/// Copy-move forgery — cloning a patch of an image over another part of the
+/// same image to duplicate or erase something — is invisible to EXIF
+/// analysis, since the file is still a single, internally consistent
+/// export. It's often invisible to ELA too, because the pasted patch
+/// shares the exact same compression history as everything else; it came
+/// from the same image, after all. What actually gives it away is that two
+/// regions of the picture are near-identical in a way real photographed
+/// scenes essentially never are.
 ///
-/// **The algorithm.** The image is swept with a sliding `blockSize` x
-/// `blockSize` window, stepped by `blockStride`. Each block is reduced to a
-/// small feature vector (a coarse grid of average brightness values) and
-/// compared against every other block; a pair whose feature vectors are
-/// close together, and whose positions are far enough apart to not just be
-/// the same patch of sky overlapping itself, is reported as a candidate
-/// clone. Blocks with near-zero pixel variance -- flat sky, a solid wall, a
-/// studio background -- are skipped before any comparison happens: without
-/// that filter, a smooth gradient would "match" thousands of times over and
-/// bury any real finding in noise.
+/// The approach here is the classic one: sweep the image with a sliding
+/// `blockSize` x `blockSize` window, stepped by `blockStride`. Reduce each
+/// block to a small feature vector (a coarse grid of average brightness
+/// values) and compare it against every other block. A pair whose feature
+/// vectors are close together, and whose positions are far enough apart to
+/// not just be the same patch of sky overlapping itself, gets reported as
+/// a candidate clone. Blocks with near-zero pixel variance — flat sky, a
+/// solid wall, a studio background — get skipped before any comparison
+/// even happens, because without that filter a smooth gradient would
+/// "match" itself thousands of times over and bury any real finding under
+/// noise.
 ///
-/// **The block size trade-off.** `blockSize` trades detection granularity
-/// against both compute cost and robustness. A small block (say 8px) can
-/// pick out a small cloned region and pinpoint it precisely, but it also
-/// has less content to fingerprint, so unrelated blocks start to look
-/// alike just by chance -- more false positives -- and there are many more
-/// of them to compare pairwise, which costs quadratic time. A large block
-/// (say 32px) is fast and confident when it matches, but a clone smaller
-/// than the block, or one that's been shifted by only a few pixels from an
-/// otherwise-identical neighbor, can slip beneath it. `blockStride` is the
-/// same trade-off along a different axis: a smaller stride overlaps blocks
-/// more and catches clones the block grid would otherwise straddle, at the
-/// cost of comparing more blocks.
+/// `blockSize` is the main trade-off to know about: it trades detection
+/// granularity against both compute cost and robustness. A small block
+/// (say 8px) can pick out a small cloned region and pinpoint it precisely,
+/// but it also has less content to fingerprint, so unrelated blocks start
+/// looking alike just by chance — more false positives — and there are a
+/// lot more of them to compare pairwise, which costs quadratic time. A
+/// bigger block (say 32px) is fast and confident when it matches, but a
+/// clone smaller than the block, or one shifted by only a few pixels from
+/// an otherwise-identical neighbor, can slip right past it. `blockStride`
+/// plays a similar role on a different axis: a smaller stride overlaps
+/// blocks more and catches clones the block grid would otherwise straddle,
+/// at the cost of comparing a lot more blocks.
 public struct CloneDetectionAnalyzer: Analyzer {
     public let identifier = "clone"
     public let displayName = "Copy-Move (Clone) Detection"

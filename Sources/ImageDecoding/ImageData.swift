@@ -3,18 +3,19 @@
 /// `ImageData` pairs the decoded `PixelBuffer` with the original file bytes
 /// and detected container format. Keeping the raw bytes around matters more
 /// than it might look: metadata analysis (EXIF) lives in file headers that
-/// sit *outside* the compressed pixel stream, so `MetadataAnalyzer` reads
-/// `rawBytes` directly and never needs pixels at all. Everything else in the
-/// package (ELA, clone detection, the scorer, the CLI) only ever touches
-/// `pixels`. Neither side needs to know how the other one works, which is
-/// the whole point of funneling all of this through one boundary type.
+/// sit outside the compressed pixel stream, so `MetadataAnalyzer` reads
+/// `rawBytes` directly and never touches pixels at all. Everything else in
+/// the package — ELA, clone detection, the scorer, the CLI — only ever
+/// looks at `pixels`. Neither side needs to know how the other one works,
+/// which is the whole point of funneling all of this through one boundary
+/// type.
 public struct ImageData: Sendable {
     /// The original, unmodified file bytes as read from disk.
     public let rawBytes: [UInt8]
 
     /// The decoded pixel grid, if decoding succeeded. This is `nil` when the
     /// container format was recognized but pixel decoding isn't supported
-    /// (baseline JPEG -- see `cstbi_decode_jpeg_baseline`), which lets
+    /// (baseline JPEG; see `cstbi_decode_jpeg_baseline`), which lets
     /// metadata-only analysis still proceed against `rawBytes`.
     public let pixels: PixelBuffer?
 

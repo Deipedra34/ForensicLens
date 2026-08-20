@@ -3,9 +3,9 @@
 ///
 /// Every analyzer gets its own nested config struct with an `enabled` flag,
 /// so the CLI (or a library caller) can turn analyzers on and off and tune
-/// their thresholds without touching code. `ForensicLensConfig` itself has
-/// no logic beyond validation -- the values here are just numbers until an
-/// analyzer reads them.
+/// their thresholds without touching code. `ForensicLensConfig` itself
+/// doesn't really do anything beyond holding these values; it's the
+/// analyzers that give them meaning.
 public struct ForensicLensConfig: Codable, Equatable, Sendable {
     /// Settings for `ELAAnalyzer`.
     public struct ELAConfig: Codable, Equatable, Sendable {
@@ -14,8 +14,8 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
 
         /// The JPEG-style recompression quality used to generate the
         /// comparison image, from 1 (heavy quantization) to 100 (almost
-        /// lossless). Lower values make ELA more sensitive but also noisier
-        /// -- see `ELAAnalyzer`'s doc comment for the trade-off.
+        /// lossless). Lower values make ELA more sensitive but also
+        /// noisier; see `ELAAnalyzer`'s doc comment for the full trade-off.
         public var qualityLevel: Int
 
         /// A per-pixel luma error above this (0...255) is considered part

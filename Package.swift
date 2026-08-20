@@ -22,11 +22,11 @@ let package = Package(
         // MARK: - C image decoding primitives
         //
         // All non-Swift code lives in this single target. It exposes a small,
-        // deliberately minimal C API for decoding BMP and PPM/PGM pixel data
-        // plus a best-effort baseline JPEG entry point. Nothing outside of
-        // `ImageDecoding` ever imports this module directly -- that keeps every
-        // other part of the package free of C types, unsafe pointers, and
-        // platform-specific decoding quirks.
+        // minimal C API for decoding BMP and PPM/PGM pixel data plus a
+        // best-effort baseline JPEG entry point. Nothing outside of
+        // `ImageDecoding` ever imports this module directly, which keeps
+        // every other part of the package free of C types, unsafe pointers,
+        // and platform-specific decoding quirks.
         .target(
             name: "CStbImage",
             path: "Sources/CStbImage",
@@ -60,8 +60,8 @@ let package = Package(
 
         // MARK: - Benchmark harness
         //
-        // Backs the script in scripts/benchmark/ -- kept as its own tiny
-        // executable target (rather than a shell script alone) so it can
+        // Backs the script in scripts/benchmark/. Kept as its own tiny
+        // executable target, rather than a shell script alone, so it can
         // call directly into ForensicLensEngine and PixelBuffer instead of
         // shelling out through the CLI's file-based interface.
         .executableTarget(

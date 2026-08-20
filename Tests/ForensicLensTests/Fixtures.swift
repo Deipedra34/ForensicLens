@@ -3,14 +3,14 @@ import ImageDecoding
 
 /// Synthetic test image builders shared across the test suite.
 ///
-/// Every fixture here is generated in-process from a fixed seed -- nothing
+/// Every fixture here is generated in-process from a fixed seed. Nothing
 /// is loaded from disk, and nothing depends on a real photo existing
 /// anywhere. That keeps the whole suite runnable offline, deterministically,
 /// with no special privileges, per the project's testing requirements.
 enum Fixtures {
     /// A small deterministic pseudo-random generator (a linear congruential
-    /// generator). `swift test` must be fully reproducible, so tests use
-    /// this instead of `Int.random` -- a flaky test that only fails on
+    /// generator). `swift test` needs to be fully reproducible, so tests
+    /// use this instead of `Int.random`. A flaky test that only fails on
     /// certain random draws is worse than no test at all.
     struct SeededGenerator {
         private var state: UInt64
@@ -24,8 +24,8 @@ enum Fixtures {
         }
     }
 
-    /// A flat, single-color image with no texture at all -- the "nothing
-    /// to see here" fixture used to exercise the uniform-image edge case in
+    /// A flat, single-color image with no texture at all: the "nothing to
+    /// see here" fixture used to exercise the uniform-image edge case in
     /// clone detection and the "no anomalies" path in ELA.
     static func uniformBuffer(width: Int, height: Int, channels: Int = 3, value: UInt8 = 128) throws -> PixelBuffer {
         try PixelBuffer(width: width, height: height, channels: channels, pixels: [UInt8](repeating: value, count: width * height * channels))
@@ -45,7 +45,7 @@ enum Fixtures {
     }
 
     /// Returns a copy of `buffer` with the `size` x `size` patch at
-    /// `(srcX, srcY)` duplicated on top of `(dstX, dstY)` -- a synthetic
+    /// `(srcX, srcY)` duplicated on top of `(dstX, dstY)`: a synthetic
     /// copy-move forgery, used to give `CloneDetectionAnalyzer` a
     /// guaranteed, exact match to find.
     static func pastingPatch(of size: Int, from src: (x: Int, y: Int), to dst: (x: Int, y: Int), into buffer: PixelBuffer) throws -> PixelBuffer {
@@ -89,7 +89,7 @@ enum Fixtures {
 
     // MARK: - Synthetic JPEG / EXIF fixtures
 
-    /// Bytes for a JPEG file with no APP1/Exif segment at all -- just SOI
+    /// Bytes for a JPEG file with no APP1/Exif segment at all, just SOI
     /// followed immediately by EOI. ForensicLens can't decode this JPEG's
     /// pixels (see `ImageDecoder`), but `ImageFormat.detect` still
     /// recognizes it, which is all `MetadataAnalyzer` needs.

@@ -4,22 +4,23 @@ import ImageDecoding
 /// Detects manipulation evidence hiding in EXIF metadata rather than pixels.
 ///
 /// A camera writes a fairly predictable set of EXIF tags: a make and model,
-/// a capture timestamp, and (usually) nothing claiming to be photo-editing
-/// software. When an image has been through an editor, three things tend to
-/// change: a `Software` tag naming the editor appears, the last-modified
-/// timestamp drifts away from the original capture time (sometimes by
-/// years), or fields a camera would always populate go missing because the
-/// export path that produced the file never wrote them. None of this proves
-/// manipulation on its own -- plenty of people crop and export their own
-/// photos with nothing to hide -- which is why this analyzer treats each
-/// observation as one weighted indicator rather than a verdict.
+/// a capture timestamp, and usually nothing claiming to be photo-editing
+/// software. Once an image has been through an editor, three things tend
+/// to change. A `Software` tag naming the editor shows up. The
+/// last-modified timestamp drifts away from the original capture time,
+/// sometimes by years. Or fields a camera would always fill in go missing
+/// because whatever export path produced the file never wrote them in the
+/// first place. None of this proves manipulation by itself — plenty of
+/// people crop and export their own photos with nothing to hide — which is
+/// why every observation here is treated as one weighted indicator, not a
+/// verdict.
 ///
-/// **Why this reads `rawBytes` instead of `pixels`.** EXIF lives in a JPEG's
-/// `APP1` marker segment, which sits in the file header *before* the
-/// compressed image scan. Reading it doesn't require decoding a single
-/// pixel, so this analyzer parses the raw file bytes directly and works
+/// One thing worth calling out: this reads `rawBytes`, not `pixels`. EXIF
+/// lives in a JPEG's `APP1` marker segment, which sits in the file header
+/// before the compressed image scan even starts, so reading it doesn't
+/// require decoding a single pixel. That's what lets this analyzer work
 /// fine even on JPEGs whose pixel data ForensicLens can't decode (see
-/// `ImageData`'s doc comment).
+/// `ImageData`'s doc comment for more on that split).
 public struct MetadataAnalyzer: Analyzer {
     public let identifier = "metadata"
     public let displayName = "EXIF / Metadata Analysis"
@@ -112,13 +113,13 @@ struct ExifSummary {
 /// A minimal TIFF/EXIF reader.
 ///
 /// This reads just enough of the TIFF structure embedded in a JPEG's APP1
-/// segment to pull out a handful of well-known tags (Make, Model, Software,
-/// and the three EXIF timestamps). It is not a general-purpose EXIF
-/// library -- it doesn't walk every IFD, doesn't handle every TIFF data
-/// type, and gives up cleanly (`nil`) on anything it doesn't recognize
-/// rather than guessing. That's a deliberate scope match for a forensic
-/// tool that only ever asks "what do these five fields say," not "dump
-/// every tag."
+/// segment to pull out a handful of well-known tags: Make, Model, Software,
+/// and the three EXIF timestamps. It's not a general-purpose EXIF library.
+/// It doesn't walk every IFD, doesn't handle every TIFF data type, and
+/// gives up cleanly (returns `nil`) on anything it doesn't recognize
+/// instead of guessing. That scope matches what this tool actually needs —
+/// it only ever asks "what do these five fields say," never "dump every
+/// tag in the file."
 enum ExifReader {
     private static let exifPreamble: [UInt8] = Array("Exif\0\0".utf8)
 

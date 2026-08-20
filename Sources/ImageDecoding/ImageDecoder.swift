@@ -31,9 +31,9 @@ public enum ImageDecoder {
         case .ppm, .pgm:
             return try decodeUsing(data, decoder: cstbi_decode_ppm)
         case .jpeg:
-            // Deliberately routed through the same C entry point used by
-            // ELAAnalyzer's documentation: a real JPEG decoder is a stub.
-            // See cstbimage.h's doc comment on cstbi_decode_jpeg_baseline.
+            // Routed through the same stub entry point ELAAnalyzer's docs
+            // mention -- there's no real JPEG decoder here yet. See
+            // cstbimage.h's doc comment on cstbi_decode_jpeg_baseline.
             return try decodeUsing(data, decoder: cstbi_decode_jpeg_baseline)
         }
     }

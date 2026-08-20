@@ -1,10 +1,10 @@
 /// Encodes `PixelBuffer` values back into simple, dependency-free container
 /// formats.
 ///
-/// This is deliberately symmetric with `ImageDecoder`: PPM and BMP are the
-/// two formats the package can round-trip without any C image library,
-/// which keeps the test suite and CLI (e.g. dumping an ELA heat map for
-/// visual inspection) fully self-contained.
+/// This mirrors `ImageDecoder` on purpose: PPM and BMP are the two formats
+/// the package can round-trip without any C image library, which keeps the
+/// test suite and CLI (e.g. dumping an ELA heat map for visual inspection)
+/// fully self-contained.
 public enum ImageEncoder {
     /// Encodes `buffer` as a binary PPM (P6) if it has 3 channels, or a
     /// binary PGM (P5) if it has 1 channel. Buffers with other channel

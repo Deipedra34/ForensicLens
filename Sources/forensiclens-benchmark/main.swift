@@ -45,10 +45,10 @@ let ela = ELAAnalyzer()
 let metadata = MetadataAnalyzer()
 let clone = CloneDetectionAnalyzer()
 
-/// Left-pads/right-pads are avoided entirely by keeping this to plain
-/// String concatenation -- `String(format:)`'s `%@` specifier depends on
+/// Column alignment is done by hand with plain String concatenation
+/// instead of `String(format:)`'s `%@` specifier, since that depends on
 /// Objective-C bridging that swift-corelibs-foundation doesn't reliably
-/// support on Linux, so column alignment is done by hand instead.
+/// support on Linux.
 func padded(_ text: String, to width: Int) -> String {
     text.count >= width ? text : text + String(repeating: " ", count: width - text.count)
 }

@@ -1,13 +1,13 @@
 /// Image container formats this package can identify by magic number.
 ///
-/// ForensicLens deliberately supports a small set of formats end-to-end
-/// (BMP and binary PPM/PGM) so that the entire test suite can build
-/// synthetic fixtures in-process without shelling out to an external image
-/// library or shipping binary test assets. JPEG detection is included so
-/// that callers get a clear, typed error (`ImageDecodingError.notImplemented`)
-/// instead of a confusing parse failure when they point the CLI at a real
-/// photo -- see `ELAAnalyzer` for how Error Level Analysis works around the
-/// lack of a real JPEG decoder.
+/// ForensicLens only supports a small set of formats end-to-end (BMP and
+/// binary PPM/PGM), and that's by design — it means the whole test suite
+/// can build synthetic fixtures in-process without shelling out to an
+/// external image library or shipping binary test assets. JPEG detection
+/// is included anyway, so callers get a clear, typed error
+/// (`ImageDecodingError.notImplemented`) instead of a confusing parse
+/// failure when they point the CLI at a real photo. See `ELAAnalyzer` for
+/// how Error Level Analysis works around not having a real JPEG decoder.
 public enum ImageFormat: String, Sendable, CaseIterable {
     case bmp
     case ppm

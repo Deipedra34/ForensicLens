@@ -3,8 +3,8 @@
 # Every key here mirrors a field on ForensicLensConfig (see
 # Sources/ForensicLens/Config/ForensicLensConfig.swift). A key you omit
 # falls back to the built-in default shown below, so you only need to list
-# the values you actually want to change -- an empty file (or no file at
-# all) is equivalent to running with pure defaults.
+# the values you actually want to change. An empty file (or no file at all)
+# is equivalent to running with pure defaults.
 
 ela:
   # Whether Error Level Analysis runs as part of a combined report.
@@ -29,9 +29,9 @@ metadata:
   enabled: true
 
   # Whether a JPEG with no EXIF data at all should itself count as an
-  # indicator. Off by default -- screenshots, scans, and many legitimate
-  # exports carry no EXIF, so this is noisy unless you know your inputs
-  # should always be direct camera captures.
+  # indicator. Off by default, since screenshots, scans, and many
+  # legitimate exports carry no EXIF; this gets noisy unless you know your
+  # inputs should always be direct camera captures.
   flagMissingExif: false
 
   # Substrings (case-insensitive) that mark the Software EXIF tag as an

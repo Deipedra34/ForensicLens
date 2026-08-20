@@ -2,11 +2,11 @@
 ///
 /// `PixelBuffer` is the single currency type that crosses the boundary
 /// between the C decoding layer (`CStbImage`) and the rest of ForensicLens.
-/// Every analyzer, the scorer, and the CLI operate exclusively on this type
-/// -- none of them ever see a C pointer, a file format quirk, or an
-/// `UnsafeMutablePointer`. That isolation is deliberate: it means new image
-/// formats can be added (or a real JPEG decoder swapped in later) by
-/// touching only this module.
+/// Every analyzer, the scorer, and the CLI work exclusively with this type;
+/// none of them ever see a C pointer, a file format quirk, or an
+/// `UnsafeMutablePointer`. That isolation is the point: it means new image
+/// formats can be added later (or a real JPEG decoder swapped in) by
+/// touching only this one module.
 ///
 /// Pixel data is stored top-to-bottom, left-to-right, with `channels`
 /// interleaved bytes per pixel (commonly 1 for grayscale or 3 for RGB).

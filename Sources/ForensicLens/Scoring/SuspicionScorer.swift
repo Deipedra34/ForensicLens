@@ -40,17 +40,17 @@ public struct ForensicReport: Sendable, Equatable, Codable {
 /// Combines every enabled analyzer's `AnalyzerFinding` into a single 0...100
 /// manipulation suspicion score and a human-readable report.
 ///
-/// **Why a weighted maximum instead of a plain average.** Averaging the
-/// three analyzer scores would let a single strong signal get diluted by
-/// two analyzers that simply found nothing to say -- an image with an
-/// unambiguous copy-move match scoring 95 on clone detection shouldn't drop
-/// to a lukewarm ~32 just because ELA and metadata had nothing unusual to
-/// report on a small BMP with no EXIF at all. `SuspicionScorer` instead
-/// takes the strongest single finding as the dominant signal and lets the
-/// other analyzers nudge the score up when they corroborate it, which
-/// matches how a human reviewer would actually reason about multiple
-/// independent pieces of evidence: one solid finding is often enough, and
-/// agreement between methods is reinforcing rather than strictly additive.
+/// Why not just average the three scores together? Because it would let a
+/// single strong signal get watered down by analyzers that simply had
+/// nothing to say. An image with an unambiguous copy-move match scoring 95
+/// on clone detection shouldn't drop to a lukewarm ~32 just because ELA and
+/// metadata found nothing unusual on a small BMP with no EXIF to begin
+/// with. So instead, `SuspicionScorer` takes the strongest single finding
+/// as the dominant signal and lets the other analyzers nudge the score up
+/// when they back it up. That's closer to how a human reviewer actually
+/// weighs a pile of independent evidence anyway: one solid finding is
+/// often enough on its own, and agreement between methods reinforces it
+/// rather than just adding up.
 public struct SuspicionScorer: Sendable {
     /// How much weight each additional corroborating analyzer contributes,
     /// on top of the dominant score. Kept modest so two weak, borderline

@@ -10,8 +10,8 @@ final class CloneDetectionAnalyzerTests: XCTestCase {
         let finding = try CloneDetectionAnalyzer().analyze(image, config: .default)
 
         // Every block is flat, so the minimum-variance filter should reject
-        // all of them before any pairwise comparison happens -- a uniform
-        // image should never be reported as "manipulated."
+        // all of them before any pairwise comparison even happens. A
+        // uniform image should never come back "manipulated."
         XCTAssertEqual(finding.score, 0)
         XCTAssertTrue(finding.indicators.isEmpty)
     }

@@ -26,16 +26,16 @@ public enum ConfigError: Error, Equatable, CustomStringConvertible {
 
 /// Loads `ForensicLensConfig` from a YAML file.
 ///
-/// This is intentionally not a general-purpose YAML implementation -- pulling
-/// in a full YAML parser (or an external dependency) for a config file with
-/// three flat sections would be a lot of machinery for very little benefit,
-/// and it would work against the "no dependencies, builds offline" goal.
-/// Instead this reads the small subset of YAML the shipped
-/// `forensiclens.yaml` actually uses: two-space-indented `key: value` pairs
-/// grouped under top-level section headers, scalar values (bools, numbers,
-/// strings), and inline `[a, b, c]` lists. Comments (`#`) and blank lines
-/// are ignored. Anything outside that subset is reported as a typed
-/// `ConfigError` rather than silently ignored or guessed at.
+/// This is not a general-purpose YAML implementation. Pulling in a full
+/// YAML parser (or an external dependency) for a config file with three
+/// flat sections would be a lot of machinery for very little payoff, and
+/// it'd work against the whole "no dependencies, builds offline" point of
+/// this project. So instead it reads the small subset of YAML the shipped
+/// `forensiclens.yaml` actually uses: two-space-indented `key: value`
+/// pairs grouped under top-level section headers, scalar values (bools,
+/// numbers, strings), and inline `[a, b, c]` lists. Comments (`#`) and
+/// blank lines are ignored. Anything outside that subset gets reported as
+/// a typed `ConfigError` rather than silently ignored or guessed at.
 public enum ConfigLoader {
     /// Parses `yaml`, applying its values on top of `ForensicLensConfig.default`
     /// so a config file only needs to mention the keys it wants to override.

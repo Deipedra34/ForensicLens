@@ -5,10 +5,10 @@
  *
  * DESIGN NOTE
  * -----------
- * This is intentionally NOT a vendored copy of stb_image.h. Pulling in the
- * full single-header stb_image library would drag several thousand lines of
- * C into the tree for formats ForensicLens does not need. Instead this file
- * hand-implements just enough of a decoder to:
+ * This is NOT a vendored copy of stb_image.h. Pulling in the full
+ * single-header stb_image library would drag several thousand lines of C
+ * into the tree for formats ForensicLens doesn't even need. So instead this
+ * file hand-implements just enough of a decoder to:
  *
  *   1. Decode uncompressed 24/32-bit Windows BMP files.
  *   2. Decode binary PPM (P6) and PGM (P5) "Netpbm" images, which are used

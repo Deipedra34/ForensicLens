@@ -4,40 +4,40 @@ import ImageDecoding
 /// Detects localized editing by re-compressing an image and measuring how
 /// much each region changes.
 ///
-/// **How Error Level Analysis works.** A JPEG loses a little bit of detail
-/// every time it's re-saved, but it loses it *evenly* across a region that
-/// was compressed once at a uniform quality. If someone pastes a clean
-/// (uncompressed, or differently-compressed) patch into an already-JPEG'd
-/// photo and re-saves the result, the pasted patch responds to a fresh
-/// recompression pass differently than the surrounding pixels that have
-/// already been through one or more compression cycles. Re-compress the
-/// whole image at a known quality, diff it pixel-by-pixel against what you
-/// started with, and the pasted region tends to light up with a
-/// conspicuously different error level than its surroundings.
+/// A JPEG loses a bit of detail every time it gets re-saved, but it loses
+/// it evenly across a region that was compressed once at a uniform
+/// quality. Paste a clean (or differently-compressed) patch into an
+/// already-JPEG'd photo and save the result, and that patch responds to a
+/// fresh recompression pass differently than pixels that have already been
+/// through one or more compression cycles. So: recompress the whole image
+/// at a known quality, diff it pixel by pixel against the original, and
+/// the pasted region tends to light up with a noticeably different error
+/// level than everything around it. That's Error Level Analysis.
 ///
-/// **Why this analyzer re-implements JPEG-style quantization instead of
-/// shelling out to a real codec.** ForensicLens deliberately does not carry
-/// a full JPEG decoder (see `cstbi_decode_jpeg_baseline`'s doc comment) --
-/// so instead of decoding and re-encoding an actual JPEG file, this analyzer
+/// ForensicLens doesn't carry a full JPEG decoder (see
+/// `cstbi_decode_jpeg_baseline`'s doc comment for why), so rather than
+/// decoding and re-encoding an actual JPEG file, this analyzer just
 /// simulates one recompression pass directly against the decoded
-/// `PixelBuffer`: an 8x8 block DCT, quantization at the configured quality,
-/// dequantization, and an inverse DCT. That's the exact lossy step a real
-/// JPEG encoder performs; running it once here reproduces the same kind of
-/// blocky error signature ELA looks for, without needing entropy coding,
-/// chroma subsampling, or a container format at all. It also means ELA
-/// works uniformly across every format this package can decode (BMP, PPM),
-/// not only JPEGs.
+/// `PixelBuffer` — an 8x8 block DCT, quantization at the configured
+/// quality, dequantization, then an inverse DCT. That's the exact lossy
+/// step a real JPEG encoder performs, so running it once here reproduces
+/// the same blocky error signature ELA is looking for, without needing
+/// entropy coding, chroma subsampling, or any actual file format. Bonus:
+/// it means ELA works the same way on every format this package can
+/// decode (BMP, PPM), not just JPEGs.
 ///
-/// **The quality/sensitivity trade-off.** A lower `qualityLevel` quantizes
-/// more aggressively, which makes the recompression pass louder everywhere
-/// -- genuine edits stand out more against a noisier background, but so
-/// does ordinary image content (sharp edges, fine texture), which raises
-/// the false-positive rate. A higher quality level is closer to lossless,
-/// so untouched regions barely move, but a subtle edit's error signature
-/// can shrink below `errorThreshold` and go unnoticed. There is no single
-/// correct value; `forensiclens.yaml`'s default of 75 mirrors the "save for
-/// web" quality most photo editors default to, which is a reasonable
-/// middle ground for images that were likely re-saved through one.
+/// The one knob that really matters here is `qualityLevel`, and it's a
+/// trade-off. Quantize more aggressively (lower quality) and the
+/// recompression pass gets louder everywhere — genuine edits stand out
+/// more against the noise, but so does ordinary image content like sharp
+/// edges and fine texture, which pushes up false positives. Go the other
+/// way and near-lossless quantization leaves untouched regions barely
+/// moving, but a subtle edit's error signature can shrink below
+/// `errorThreshold` and slip past unnoticed. There's no value that's
+/// "correct" for every image; `forensiclens.yaml`'s default of 75 mirrors
+/// the "save for web" quality most photo editors default to, which is a
+/// reasonable middle ground for a photo that's probably been re-saved
+/// through one already.
 public struct ELAAnalyzer: Analyzer {
     public let identifier = "ela"
     public let displayName = "Error Level Analysis"
@@ -160,11 +160,11 @@ public struct ELAAnalyzer: Analyzer {
 /// A minimal, self-contained simulator of one JPEG-style lossy
 /// recompression pass, used by `ELAAnalyzer`.
 ///
-/// This implements exactly the lossy step of baseline JPEG encoding --
-/// level shift, forward DCT, quantize, dequantize, inverse DCT -- and
-/// nothing else (no chroma subsampling, no entropy coding, no file format).
-/// It operates directly on `PixelBuffer`, which is what lets `ELAAnalyzer`
-/// work without a real JPEG codec.
+/// It implements exactly the lossy part of baseline JPEG encoding (level
+/// shift, forward DCT, quantize, dequantize, inverse DCT) and nothing
+/// else — no chroma subsampling, no entropy coding, no file format at all.
+/// It works directly on `PixelBuffer`, which is what lets `ELAAnalyzer`
+/// run without a real JPEG codec behind it.
 enum JPEGRecompressionSimulator {
     private static let blockSize = 8
 
@@ -261,9 +261,9 @@ enum JPEGRecompressionSimulator {
 
 /// A direct (non-FFT) 8x8 two-dimensional DCT-II / DCT-III pair.
 ///
-/// Block size is fixed at 8, matching JPEG, so a direct O(N^3) separable
-/// implementation with a precomputed cosine table is simple and fast
-/// enough -- there's no need for a general-purpose or FFT-based transform.
+/// Block size is fixed at 8, matching JPEG, so a straightforward O(N^3)
+/// separable implementation with a precomputed cosine table is plenty fast.
+/// No real need to reach for an FFT here.
 enum DCT8x8 {
     private static let n = 8
     private static let scale = (2.0 / 8.0).squareRoot()
