@@ -1,0 +1,69 @@
+# ForensicLens configuration.
+#
+# Every key here mirrors a field on ForensicLensConfig (see
+# Sources/ForensicLens/Config/ForensicLensConfig.swift). A key you omit
+# falls back to the built-in default shown below, so you only need to list
+# the values you actually want to change -- an empty file (or no file at
+# all) is equivalent to running with pure defaults.
+
+ela:
+  # Whether Error Level Analysis runs as part of a combined report.
+  enabled: true
+
+  # JPEG-style recompression quality used for the ELA comparison pass,
+  # 1 (heavy quantization, noisy but sensitive) to 100 (near-lossless,
+  # clean but can miss subtle edits). 75 mirrors a typical "save for web"
+  # export quality.
+  qualityLevel: 75
+
+  # A reporting cell's mean pixel error (0-255 scale) at or above this is
+  # considered a "hot" region rather than ordinary recompression noise.
+  errorThreshold: 28
+
+  # Fraction of the image (0-1) that must fall inside hot regions before
+  # ELA calls the image suspicious rather than just noting some noise.
+  flaggedRegionFraction: 0.015
+
+metadata:
+  # Whether EXIF/metadata analysis runs as part of a combined report.
+  enabled: true
+
+  # Whether a JPEG with no EXIF data at all should itself count as an
+  # indicator. Off by default -- screenshots, scans, and many legitimate
+  # exports carry no EXIF, so this is noisy unless you know your inputs
+  # should always be direct camera captures.
+  flagMissingExif: false
+
+  # Substrings (case-insensitive) that mark the Software EXIF tag as an
+  # editing tool rather than a camera or phone.
+  suspiciousSoftwareKeywords: [photoshop, gimp, lightroom, "affinity photo", pixelmator, snapseed, "paint.net", picsart]
+
+  # Largest gap, in seconds, allowed between DateTimeOriginal and DateTime
+  # before it's flagged. Default is 30 days.
+  maxTimestampDriftSeconds: 2592000
+
+cloneDetection:
+  # Whether copy-move (clone) detection runs as part of a combined report.
+  enabled: true
+
+  # Side length, in pixels, of each comparison block. Smaller catches
+  # smaller clones but costs more compute and is noisier; larger is faster
+  # and more robust but can miss small edits.
+  blockSize: 16
+
+  # Pixel distance between consecutive candidate blocks. Smaller overlaps
+  # more (better recall, more compute).
+  blockStride: 8
+
+  # Blocks with pixel variance below this are treated as flat (sky, a
+  # wall) and skipped, since flat regions look identical to each other by
+  # default and would otherwise flood the match list.
+  minimumBlockVariance: 20
+
+  # Maximum feature-space distance between two blocks for them to count as
+  # a match. Lower is stricter.
+  similarityThreshold: 6
+
+  # Minimum pixel distance required between two matched blocks' positions,
+  # so a block never trivially "matches" its own near neighbors.
+  minimumBlockDistance: 24
