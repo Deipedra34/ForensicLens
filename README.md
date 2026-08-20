@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/banner.svg" alt="ForensicLens — image manipulation detection, built with Swift" width="100%">
+</p>
+
 # ForensicLens
 
 A Swift library and CLI for spotting signs of digital manipulation in still images. It runs three independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, and copy-move/clone detection) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.

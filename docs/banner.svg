@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" role="img" aria-label="ForensicLens — Image manipulation detection, built with Swift">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#182338" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="lensGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6fd2ff"/>
+      <stop offset="100%" stop-color="#2f8fff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1b4a7a" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#1b4a7a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="600" fill="#0a0e17"/>
+  <rect width="1200" height="600" fill="url(#grid)"/>
+  <ellipse cx="220" cy="300" rx="360" ry="260" fill="url(#glow)"/>
+
+  <!-- constellation decoration -->
+  <g stroke="#3b9eff" stroke-width="1.6" opacity="0.55" fill="none">
+    <path d="M905,70 L1005,255 L965,320 L1090,235 L1145,290 M1005,255 L1030,410"/>
+  </g>
+  <g fill="#5fc4ff">
+    <circle cx="905" cy="70" r="5"/>
+    <circle cx="1005" cy="255" r="5"/>
+    <circle cx="965" cy="320" r="5"/>
+    <circle cx="1090" cy="235" r="5"/>
+    <circle cx="1145" cy="290" r="5"/>
+    <circle cx="1030" cy="410" r="5"/>
+  </g>
+
+  <!-- icon: photo frame + magnifying glass -->
+  <g transform="translate(60,195)">
+    <rect x="0" y="0" width="150" height="115" rx="14" fill="none" stroke="#3b9eff" stroke-width="5"/>
+    <circle cx="42" cy="34" r="10" fill="none" stroke="#3b9eff" stroke-width="5"/>
+    <path d="M14,95 L55,50 L85,80 L112,60 L138,95" fill="none" stroke="#3b9eff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="107" cy="80" r="44" fill="#0a0e17" stroke="#3b9eff" stroke-width="7"/>
+    <circle cx="107" cy="80" r="3" fill="#3b9eff"/>
+    <line x1="139" y1="112" x2="172" y2="145" stroke="#3b9eff" stroke-width="9" stroke-linecap="round"/>
+  </g>
+
+  <!-- title -->
+  <text x="280" y="300" font-family="Arial, Helvetica, sans-serif" font-size="82" font-weight="800">
+    <tspan fill="#f5f7fa">Forensic</tspan><tspan fill="url(#lensGradient)">Lens</tspan>
+  </text>
+
+  <!-- subtitle -->
+  <text x="282" y="345" font-family="Arial, Helvetica, sans-serif" font-size="27" fill="#8b93a6">Image manipulation detection, built with Swift</text>
+
+  <!-- badges -->
+  <g font-family="Arial, Helvetica, sans-serif" font-size="21" fill="#cfe0f5">
+    <rect x="282" y="388" width="260" height="54" rx="27" fill="none" stroke="#2f4864" stroke-width="1.5"/>
+    <text x="412" y="422" text-anchor="middle">Error level analysis</text>
+
+    <rect x="562" y="388" width="200" height="54" rx="27" fill="none" stroke="#2f4864" stroke-width="1.5"/>
+    <text x="662" y="422" text-anchor="middle">EXIF forensics</text>
+
+    <rect x="782" y="388" width="210" height="54" rx="27" fill="none" stroke="#2f4864" stroke-width="1.5"/>
+    <text x="887" y="422" text-anchor="middle">Clone detection</text>
+  </g>
+
+  <!-- caption -->
+  <text x="282" y="555" font-family="Arial, Helvetica, sans-serif" font-size="21" fill="#5c6478">by Deipedra</text>
+</svg>
