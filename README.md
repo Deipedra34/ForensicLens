@@ -241,3 +241,7 @@ The whole suite runs offline, without special privileges, against synthetic imag
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+---
+
+<p align="center"><em>-by Deipedra</em></p>
