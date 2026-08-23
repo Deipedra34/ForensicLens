@@ -42,6 +42,23 @@ metadata:
   # before it's flagged. Default is 30 days.
   maxTimestampDriftSeconds: 2592000
 
+  # Largest gap, in seconds, allowed between the GPS timestamp
+  # (GPSDateStamp/GPSTimeStamp, always UTC per the EXIF spec) and
+  # DateTimeOriginal before it's flagged. Kept small since this catches
+  # clock desync, not timezone offsets -- a camera whose clock is set to
+  # local time in a non-zero UTC offset will trip this on every GPS-tagged
+  # photo by roughly that offset; raise this value (or disable the check by
+  # setting it very high) for local-time-camera datasets. Default is 5
+  # minutes.
+  maxGPSTimestampDriftSeconds: 300
+
+  # Largest gap, in seconds, allowed between DateTimeDigitized and
+  # DateTimeOriginal before it's flagged. For a straight-from-camera JPEG
+  # these are normally seconds apart; a bigger gap suggests the file was
+  # digitized separately from capture, as happens when an editor re-saves
+  # it. Default is 5 minutes.
+  maxDigitizedDriftSeconds: 300
+
 cloneDetection:
   # Whether copy-move (clone) detection runs as part of a combined report.
   enabled: true

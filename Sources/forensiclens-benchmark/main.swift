@@ -55,7 +55,7 @@ func padded(_ text: String, to width: Int) -> String {
 
 print("ForensicLens benchmark")
 print("=======================")
-print(padded("size", 12) + padded("pixels", 10) + padded("ela (ms)", 14) + padded("clone (ms)", 14) + "metadata (ms)")
+print(padded("size", to: 12) + padded("pixels", to: 10) + padded("ela (ms)", to: 14) + padded("clone (ms)", to: 14) + "metadata (ms)")
 
 for (width, height) in sizes {
     let image = try makeNoiseImage(width: width, height: height)
@@ -67,10 +67,10 @@ for (width, height) in sizes {
     // point is to show its cost is essentially zero next to pixel analysis.
     let metadataTime = try timeMilliseconds { _ = try metadata.analyze(image, config: config) }
 
-    let row = padded("\(width)x\(height)", 12)
-        + padded("\(width * height)", 10)
-        + padded(String(format: "%.2f", elaTime), 14)
-        + padded(String(format: "%.2f", cloneTime), 14)
+    let row = padded("\(width)x\(height)", to: 12)
+        + padded("\(width * height)", to: 10)
+        + padded(String(format: "%.2f", elaTime), to: 14)
+        + padded(String(format: "%.2f", cloneTime), to: 14)
         + String(format: "%.4f", metadataTime)
     print(row)
 }

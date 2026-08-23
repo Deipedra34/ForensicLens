@@ -139,6 +139,10 @@ public enum ConfigLoader {
             metadata.suspiciousSoftwareKeywords = try parseStringList(key: key, value: value)
         case "maxTimestampDriftSeconds":
             metadata.maxTimestampDriftSeconds = try parseInt(key: key, value: value)
+        case "maxGPSTimestampDriftSeconds":
+            metadata.maxGPSTimestampDriftSeconds = try parseInt(key: key, value: value)
+        case "maxDigitizedDriftSeconds":
+            metadata.maxDigitizedDriftSeconds = try parseInt(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "metadata", key: key)
         }

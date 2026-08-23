@@ -99,25 +99,55 @@ enum Fixtures {
 
     /// Bytes for a JPEG file whose APP1 segment carries the given EXIF
     /// fields. Any parameter left `nil` is simply omitted from the file.
+    ///
+    /// - Parameters:
+    ///   - gpsDateTimeUTC: A `"YYYY:MM:DD HH:MM:SS"` string written as the
+    ///     combined `GPSDateStamp` + `GPSTimeStamp` pair.
+    ///   - gpsAltitude: Written as `GPSAltitude`, encoded as a *signed*
+    ///     rational (numerator/1000) even though the real tag type is the
+    ///     unsigned RATIONAL -- this is what lets tests construct the
+    ///     malformed "negative altitude" fixture `readSignedRational`
+    ///     is meant to catch.
     static func jpegBytes(
         make: String? = nil,
         model: String? = nil,
         software: String? = nil,
+        lensModel: String? = nil,
         dateTime: String? = nil,
         dateTimeOriginal: String? = nil,
-        dateTimeDigitized: String? = nil
+        dateTimeDigitized: String? = nil,
+        gpsDateTimeUTC: String? = nil,
+        gpsAltitude: Double? = nil,
+        gpsAltitudeRef: UInt8? = nil
     ) -> [UInt8] {
         var ifd0Fields: [ExifFixtureBuilder.Field] = []
-        if let make { ifd0Fields.append(.init(tag: 0x010F, text: make)) }
-        if let model { ifd0Fields.append(.init(tag: 0x0110, text: model)) }
-        if let software { ifd0Fields.append(.init(tag: 0x0131, text: software)) }
-        if let dateTime { ifd0Fields.append(.init(tag: 0x0132, text: dateTime)) }
+        if let make { ifd0Fields.append(.init(tag: 0x010F, value: .ascii(make))) }
+        if let model { ifd0Fields.append(.init(tag: 0x0110, value: .ascii(model))) }
+        if let software { ifd0Fields.append(.init(tag: 0x0131, value: .ascii(software))) }
+        if let dateTime { ifd0Fields.append(.init(tag: 0x0132, value: .ascii(dateTime))) }
 
         var subIFDFields: [ExifFixtureBuilder.Field] = []
-        if let dateTimeOriginal { subIFDFields.append(.init(tag: 0x9003, text: dateTimeOriginal)) }
-        if let dateTimeDigitized { subIFDFields.append(.init(tag: 0x9004, text: dateTimeDigitized)) }
+        if let dateTimeOriginal { subIFDFields.append(.init(tag: 0x9003, value: .ascii(dateTimeOriginal))) }
+        if let dateTimeDigitized { subIFDFields.append(.init(tag: 0x9004, value: .ascii(dateTimeDigitized))) }
+        if let lensModel { subIFDFields.append(.init(tag: 0xA434, value: .ascii(lensModel))) }
 
-        let tiff = ExifFixtureBuilder.build(ifd0Fields: ifd0Fields, subIFDFields: subIFDFields)
+        var gpsIFDFields: [ExifFixtureBuilder.Field] = []
+        if let gpsDateTimeUTC {
+            let segments = gpsDateTimeUTC.split(separator: " ")
+            precondition(segments.count == 2, "gpsDateTimeUTC must be \"YYYY:MM:DD HH:MM:SS\"")
+            let timeParts = segments[1].split(separator: ":").map { Int32($0)! }
+            precondition(timeParts.count == 3, "gpsDateTimeUTC must be \"YYYY:MM:DD HH:MM:SS\"")
+            gpsIFDFields.append(.init(tag: 0x001D, value: .ascii(String(segments[0]))))
+            gpsIFDFields.append(.init(tag: 0x0007, value: .rationalTriplet(timeParts.map { ($0, 1) })))
+        }
+        if let gpsAltitude {
+            gpsIFDFields.append(.init(tag: 0x0006, value: .rational(numerator: Int32((gpsAltitude * 1000).rounded()), denominator: 1000)))
+        }
+        if let gpsAltitudeRef {
+            gpsIFDFields.append(.init(tag: 0x0005, value: .byte(gpsAltitudeRef)))
+        }
+
+        let tiff = ExifFixtureBuilder.build(ifd0Fields: ifd0Fields, subIFDFields: subIFDFields, gpsIFDFields: gpsIFDFields)
 
         var app1Payload = Array("Exif\0\0".utf8)
         app1Payload.append(contentsOf: tiff)
@@ -137,70 +167,107 @@ enum Fixtures {
 
 /// Hand-rolled TIFF writer used only to build EXIF fixtures for
 /// `MetadataAnalyzerTests`. It mirrors `ExifReader`'s layout expectations
-/// exactly (byte order, inline-vs-offset ASCII storage, the Exif SubIFD
-/// pointer) so the tests exercise the real parsing path rather than a
-/// simplified stand-in.
+/// exactly (byte order, inline-vs-offset value storage, the Exif SubIFD and
+/// GPS IFD pointers) so the tests exercise the real parsing path rather
+/// than a simplified stand-in.
 enum ExifFixtureBuilder {
-    struct Field {
-        let tag: UInt16
-        let text: String
+    enum FieldValue {
+        case ascii(String)
+        case byte(UInt8)
+        /// A single RATIONAL, written as a signed two's-complement
+        /// numerator so fixtures can represent the malformed
+        /// "negative GPSAltitude" case `readSignedRational` decodes.
+        case rational(numerator: Int32, denominator: UInt32)
+        /// Several RATIONALs in one field, e.g. `GPSTimeStamp`'s
+        /// hour/minute/second triplet.
+        case rationalTriplet([(Int32, UInt32)])
     }
 
-    static func build(ifd0Fields: [Field], subIFDFields: [Field]) -> [UInt8] {
+    struct Field {
+        let tag: UInt16
+        let value: FieldValue
+    }
+
+    static func build(ifd0Fields: [Field], subIFDFields: [Field], gpsIFDFields: [Field] = []) -> [UInt8] {
         let hasSubIFD = !subIFDFields.isEmpty
+        let hasGPSIFD = !gpsIFDFields.isEmpty
+
         var entryCountIFD0 = ifd0Fields.count
         if hasSubIFD { entryCountIFD0 += 1 }
+        if hasGPSIFD { entryCountIFD0 += 1 }
 
         let ifd0Start = 8
         let ifd0Size = 2 + entryCountIFD0 * 12 + 4
         let subIFDStart = ifd0Start + ifd0Size
         let subIFDSize = hasSubIFD ? (2 + subIFDFields.count * 12 + 4) : 0
-        let externalStart = subIFDStart + subIFDSize
+        let gpsIFDStart = subIFDStart + subIFDSize
+        let gpsIFDSize = hasGPSIFD ? (2 + gpsIFDFields.count * 12 + 4) : 0
+        let externalStart = gpsIFDStart + gpsIFDSize
 
         var external: [UInt8] = []
 
-        func valueBytes(for text: String) -> (inline: [UInt8]?, offset: UInt32?, count: UInt32) {
-            var raw = Array(text.utf8)
-            raw.append(0)
-            let count = UInt32(raw.count)
-            if raw.count <= 4 {
-                while raw.count < 4 { raw.append(0) }
-                return (raw, nil, count)
-            } else {
+        func valueBytes(for value: FieldValue) -> (inline: [UInt8]?, offset: UInt32?, count: UInt32, type: UInt16) {
+            switch value {
+            case .ascii(let text):
+                var raw = Array(text.utf8)
+                raw.append(0)
+                let count = UInt32(raw.count)
+                if raw.count <= 4 {
+                    while raw.count < 4 { raw.append(0) }
+                    return (raw, nil, count, 2)
+                } else {
+                    let offset = UInt32(externalStart + external.count)
+                    external.append(contentsOf: raw)
+                    return (nil, offset, count, 2)
+                }
+            case .byte(let b):
+                return ([b, 0, 0, 0], nil, 1, 1)
+            case .rational(let numerator, let denominator):
                 let offset = UInt32(externalStart + external.count)
-                external.append(contentsOf: raw)
-                return (nil, offset, count)
+                external.append(contentsOf: u32le(UInt32(bitPattern: numerator)))
+                external.append(contentsOf: u32le(denominator))
+                return (nil, offset, 1, 5)
+            case .rationalTriplet(let triplet):
+                let offset = UInt32(externalStart + external.count)
+                for (numerator, denominator) in triplet {
+                    external.append(contentsOf: u32le(UInt32(bitPattern: numerator)))
+                    external.append(contentsOf: u32le(denominator))
+                }
+                return (nil, offset, UInt32(triplet.count), 5)
             }
         }
 
-        func writeEntries(_ fields: [Field], extraPointer: (tag: UInt16, offset: UInt32)?) -> [UInt8] {
+        func writeEntries(_ fields: [Field], extraPointers: [(tag: UInt16, offset: UInt32)]) -> [UInt8] {
             var bytes: [UInt8] = []
-            var count = fields.count
-            if extraPointer != nil { count += 1 }
-            bytes.append(contentsOf: u16le(UInt16(count)))
+            bytes.append(contentsOf: u16le(UInt16(fields.count + extraPointers.count)))
             for field in fields {
-                let (inline, offset, textCount) = valueBytes(for: field.text)
+                let (inline, offset, valueCount, type) = valueBytes(for: field.value)
                 bytes.append(contentsOf: u16le(field.tag))
-                bytes.append(contentsOf: u16le(2)) // ASCII
-                bytes.append(contentsOf: u32le(textCount))
+                bytes.append(contentsOf: u16le(type))
+                bytes.append(contentsOf: u32le(valueCount))
                 if let inline {
                     bytes.append(contentsOf: inline)
                 } else if let offset {
                     bytes.append(contentsOf: u32le(offset))
                 }
             }
-            if let extraPointer {
-                bytes.append(contentsOf: u16le(extraPointer.tag))
+            for pointer in extraPointers {
+                bytes.append(contentsOf: u16le(pointer.tag))
                 bytes.append(contentsOf: u16le(4)) // LONG
                 bytes.append(contentsOf: u32le(1))
-                bytes.append(contentsOf: u32le(extraPointer.offset))
+                bytes.append(contentsOf: u32le(pointer.offset))
             }
             bytes.append(contentsOf: u32le(0)) // next IFD offset
             return bytes
         }
 
-        let ifd0Bytes = writeEntries(ifd0Fields, extraPointer: hasSubIFD ? (tag: 0x8769, offset: UInt32(subIFDStart)) : nil)
-        let subIFDBytes = hasSubIFD ? writeEntries(subIFDFields, extraPointer: nil) : []
+        var extraPointers: [(tag: UInt16, offset: UInt32)] = []
+        if hasSubIFD { extraPointers.append((0x8769, UInt32(subIFDStart))) }
+        if hasGPSIFD { extraPointers.append((0x8825, UInt32(gpsIFDStart))) }
+
+        let ifd0Bytes = writeEntries(ifd0Fields, extraPointers: extraPointers)
+        let subIFDBytes = hasSubIFD ? writeEntries(subIFDFields, extraPointers: []) : []
+        let gpsIFDBytes = hasGPSIFD ? writeEntries(gpsIFDFields, extraPointers: []) : []
 
         var result: [UInt8] = []
         result.append(contentsOf: Array("II".utf8))
@@ -208,6 +275,7 @@ enum ExifFixtureBuilder {
         result.append(contentsOf: u32le(UInt32(ifd0Start)))
         result.append(contentsOf: ifd0Bytes)
         result.append(contentsOf: subIFDBytes)
+        result.append(contentsOf: gpsIFDBytes)
         result.append(contentsOf: external)
         return result
     }

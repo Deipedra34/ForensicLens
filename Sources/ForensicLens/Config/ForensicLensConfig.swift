@@ -54,11 +54,28 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         /// re-save is normal; a multi-year gap usually isn't.
         public var maxTimestampDriftSeconds: Int
 
-        public init(enabled: Bool, flagMissingExif: Bool, suspiciousSoftwareKeywords: [String], maxTimestampDriftSeconds: Int) {
+        /// The largest gap, in seconds, allowed between the GPS timestamp
+        /// (`GPSDateStamp`/`GPSTimeStamp`, always UTC) and `DateTimeOriginal`
+        /// before it's flagged. Kept small since this is meant to catch
+        /// clock desync, not timezone offsets -- see
+        /// `MetadataAnomaly.gpsTimestampDrift`'s doc comment for that
+        /// assumption's limits. Default is 5 minutes.
+        public var maxGPSTimestampDriftSeconds: Int
+
+        /// The largest gap, in seconds, allowed between `DateTimeDigitized`
+        /// and `DateTimeOriginal` before it's flagged. For a straight-from-
+        /// camera JPEG these are normally seconds apart; a bigger gap
+        /// suggests the file was digitized separately from capture, as
+        /// happens when an editor re-saves it. Default is 5 minutes.
+        public var maxDigitizedDriftSeconds: Int
+
+        public init(enabled: Bool, flagMissingExif: Bool, suspiciousSoftwareKeywords: [String], maxTimestampDriftSeconds: Int, maxGPSTimestampDriftSeconds: Int, maxDigitizedDriftSeconds: Int) {
             self.enabled = enabled
             self.flagMissingExif = flagMissingExif
             self.suspiciousSoftwareKeywords = suspiciousSoftwareKeywords
             self.maxTimestampDriftSeconds = maxTimestampDriftSeconds
+            self.maxGPSTimestampDriftSeconds = maxGPSTimestampDriftSeconds
+            self.maxDigitizedDriftSeconds = maxDigitizedDriftSeconds
         }
     }
 
@@ -129,7 +146,9 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
                 "photoshop", "gimp", "lightroom", "affinity photo",
                 "pixelmator", "snapseed", "paint.net", "picsart"
             ],
-            maxTimestampDriftSeconds: 60 * 60 * 24 * 30 // 30 days
+            maxTimestampDriftSeconds: 60 * 60 * 24 * 30, // 30 days
+            maxGPSTimestampDriftSeconds: 60 * 5, // 5 minutes
+            maxDigitizedDriftSeconds: 60 * 5 // 5 minutes
         ),
         cloneDetection: CloneDetectionConfig(
             enabled: true,

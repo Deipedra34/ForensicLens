@@ -76,7 +76,7 @@ Analyzers themselves are pluggable through the `Analyzer` protocol. `ForensicLen
 | Analyzer | What it looks for | Needs decoded pixels? | Needs EXIF? |
 |---|---|:---:|:---:|
 | Error Level Analysis | Regions with a compression-error signature inconsistent with the rest of the image | Yes | No |
-| EXIF / Metadata | Editing-software signatures, impossible or drifted timestamps, missing camera fields | No | Yes (JPEG only) |
+| EXIF / Metadata | Editing-software signatures, impossible or drifted timestamps, missing camera fields, cross-field inconsistencies (GPS vs. capture timestamp, GPS vs. camera identity, GPS altitude sign, editing software vs. unedited-camera claim) | No | Yes (JPEG only) |
 | Copy-Move (Clone) Detection | Duplicated blocks pasted elsewhere in the same image | Yes | No |
 
 | Capability | Status |
@@ -189,6 +189,8 @@ metadata:
   flagMissingExif: false
   suspiciousSoftwareKeywords: [photoshop, gimp, lightroom, "affinity photo", pixelmator, snapseed, "paint.net", picsart]
   maxTimestampDriftSeconds: 2592000  # 30 days
+  maxGPSTimestampDriftSeconds: 300   # 5 minutes; GPS timestamp vs. DateTimeOriginal
+  maxDigitizedDriftSeconds: 300      # 5 minutes; DateTimeDigitized vs. DateTimeOriginal
 
 cloneDetection:
   enabled: true
@@ -204,7 +206,7 @@ cloneDetection:
 Deeper trade-off discussion lives in [`docs/algorithms.md`](docs/algorithms.md) and as doc comments on the analyzer types themselves. Short version:
 
 - **ELA** doesn't rely on a real JPEG codec. It simulates one JPEG-style lossy recompression pass (block DCT, quantize at the configured quality, dequantize, inverse DCT) directly against the decoded pixel buffer, which is the exact lossy step ELA actually depends on. That's what lets it run against any format this package can decode, not just JPEG.
-- **Metadata analysis** reads EXIF straight out of the raw file bytes, from the `APP1` marker segment, so it works even on JPEGs whose pixel data this package can't decode.
+- **Metadata analysis** reads EXIF straight out of the raw file bytes, from the `APP1` marker segment, so it works even on JPEGs whose pixel data this package can't decode. Beyond flagging individual fields (missing, malformed, editing-software signatures), it also runs cross-field checks that compare related values against each other, since two contradicting fields are a stronger tampering signal than either looks alone: GPS timestamp vs. `DateTimeOriginal` (default 5-minute tolerance -- see `MetadataAnomaly.gpsTimestampDrift`'s doc comment for why this assumes both clocks read the same wall-clock time, and its limits on cameras set to local time), `DateTimeDigitized` vs. `DateTimeOriginal` drift (default 5 minutes), GPS location present without camera Make/Model or vice versa (asymmetric weighting -- GPS without an identified device is the more surprising direction), `GPSAltitude` decoding negative without `GPSAltitudeRef` indicating "below sea level", and a `Software` tag naming an editor while Make/Model/Lens and an unchanged `ModifyDate` still claim an untouched camera original.
 - **Clone detection** filters out flat, low-variance blocks before comparing anything. Skip that step and a clear sky or a plain wall would "match" itself thousands of times over and swamp any real finding.
 
 ## Image format support
