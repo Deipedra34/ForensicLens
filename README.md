@@ -82,8 +82,9 @@ Analyzers themselves are pluggable through the `Analyzer` protocol. `ForensicLen
 | Capability | Status |
 |---|---|
 | Library + CLI in one package | Yes |
-| Plain-text and JSON report output | Yes |
+| Plain-text, JSON, and CSV report output | Yes |
 | Per-analyzer enable/disable via config | Yes |
+| Concurrent batch scanning of a directory of images | Yes |
 | Cross-platform (macOS / Linux) | Yes |
 | Third-party dependencies | None |
 
@@ -114,19 +115,31 @@ swift build -c release
 
 ```
 forensiclens-cli <command> <image-path> [--json] [--config <path>]
+forensiclens-cli batch <directory> [options]
 
 COMMANDS:
   report      Run every enabled analyzer and print a combined report.
   ela         Run only Error Level Analysis.
   metadata    Run only EXIF/metadata analysis.
   clone       Run only copy-move (clone) detection.
+  batch       Scan a directory of images and print one summary report.
   help        Show usage.
 
-OPTIONS:
+OPTIONS (report / ela / metadata / clone):
   --json           Print the report as JSON instead of plain text.
   --config <path>  Path to a forensiclens.yaml config file.
                     Defaults to ./forensiclens.yaml; a missing file
                     falls back to built-in defaults.
+
+OPTIONS (batch):
+  --no-recursive        Only scan the top-level directory, skip subdirectories.
+  --extensions <list>   Comma-separated file extensions to treat as images.
+                         Defaults to "jpg,jpeg,png".
+  --max-concurrency <n> Maximum number of images analyzed at once. Defaults
+                         to the number of available CPU cores.
+  --format <fmt>        Report format: text (default), json, or csv.
+  --output <path>       Write the report to a file instead of stdout.
+  --config <path>       Same as above.
 ```
 
 Examples:
@@ -140,7 +153,18 @@ forensiclens-cli clone photo.ppm --json
 
 # Custom thresholds
 forensiclens-cli report photo.bmp --config strict.yaml
+
+# Recursively scan a folder of images, sorted by suspicion score
+forensiclens-cli batch photos/
+
+# Only the top-level directory, and only BMP/PPM files
+forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
+
+# Export the batch report as JSON instead of printing a table
+forensiclens-cli batch photos/ --format json --output report.json
 ```
+
+`batch` reuses the exact same `ForensicLensEngine` pipeline the single-image commands do -- every image is decoded and run through every enabled analyzer, then combined into a `ForensicReport` -- just fanned out concurrently across a whole directory instead of one file at a time. A file that fails to decode (or throws during analysis) is logged to stderr with its path and the reason, then skipped; it never aborts the rest of the batch. Progress ("42/500 processed") and per-file skip warnings go to stderr, so they never contaminate the report on stdout or in `--output`.
 
 Sample plain-text output:
 
@@ -238,7 +262,7 @@ ELA scales roughly linearly with pixel count, since it's a fixed amount of work 
 swift test
 ```
 
-The whole suite runs offline, without special privileges, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. No real photos, no network access, no filesystem fixtures. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone.
+The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file.
 
 ## License
 

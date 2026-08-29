@@ -72,7 +72,7 @@ let package = Package(
         // MARK: - Tests
         .testTarget(
             name: "ForensicLensTests",
-            dependencies: ["ForensicLens", "ImageDecoding"],
+            dependencies: ["ForensicLens", "ImageDecoding", "forensiclens-cli"],
             path: "Tests/ForensicLensTests"
         )
     ]
