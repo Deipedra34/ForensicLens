@@ -22,10 +22,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # No swift-version pin: swift-actions/setup-swift installs the latest
+      # available toolchain, which is always >= this package's minimum
+      # (swift-tools-version:5.9 in Package.swift, which is a floor, not an
+      # exact version). Pinning to 5.9 broke this job once ubuntu-latest
+      # moved to a newer Ubuntu than Swift 5.9 has an official build for
+      # (HTTP 404 fetching the toolchain); tracking "latest" avoids that
+      # class of failure recurring as the runner image ages.
       - name: Set up Swift toolchain
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "5.9"
+        uses: swift-actions/setup-swift@v3
 
       - name: Build project
         run: swift build -c release
