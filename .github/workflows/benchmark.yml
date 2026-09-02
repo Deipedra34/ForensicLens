@@ -29,8 +29,17 @@ jobs:
       # moved to a newer Ubuntu than Swift 5.9 has an official build for
       # (HTTP 404 fetching the toolchain); tracking "latest" avoids that
       # class of failure recurring as the runner image ages.
+      #
+      # skip-verify-signature works around a currently-open upstream bug
+      # (swift-actions/setup-swift#798) where GPG verification of the
+      # downloaded toolchain fails with "No public key" for every version,
+      # unrelated to this project. The toolchain is still fetched over
+      # HTTPS from swift.org; this only skips the extra GPG check on top
+      # of that. Safe to drop once #798 is fixed upstream.
       - name: Set up Swift toolchain
         uses: swift-actions/setup-swift@v3
+        with:
+          skip-verify-signature: true
 
       - name: Build project
         run: swift build -c release
