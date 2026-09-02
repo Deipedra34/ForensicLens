@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2025-01-01T00:00:00Z",
+  "results": [
+    { "analyzer": "ELA", "size": "64x64", "pixels": 4096, "milliseconds": 3.10 },
+    { "analyzer": "Clone Detection", "size": "64x64", "pixels": 4096, "milliseconds": 4.85 },
+    { "analyzer": "Metadata", "size": "64x64", "pixels": 4096, "milliseconds": 0.01 },
+    { "analyzer": "ELA", "size": "128x128", "pixels": 16384, "milliseconds": 11.40 },
+    { "analyzer": "Clone Detection", "size": "128x128", "pixels": 16384, "milliseconds": 38.20 },
+    { "analyzer": "Metadata", "size": "128x128", "pixels": 16384, "milliseconds": 0.01 },
+    { "analyzer": "ELA", "size": "256x256", "pixels": 65536, "milliseconds": 44.70 },
+    { "analyzer": "Clone Detection", "size": "256x256", "pixels": 65536, "milliseconds": 241.60 },
+    { "analyzer": "Metadata", "size": "256x256", "pixels": 65536, "milliseconds": 0.01 }
+  ]
+}

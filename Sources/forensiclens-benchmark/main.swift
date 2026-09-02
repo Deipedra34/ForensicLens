@@ -1,15 +1,24 @@
 import Foundation
 import ForensicLens
 import ImageDecoding
+import BenchmarkReporting
 
 /// Measures how long each analyzer takes against a handful of synthetic
 /// image sizes.
 ///
 /// This is invoked by `scripts/benchmark/run.sh`, which just wraps
-/// `swift run -c release forensiclens-benchmark`. The images are generated
-/// in-process rather than read from disk (same deterministic noise
-/// generator the test suite's fixtures use) so the benchmark has no
-/// external inputs to manage and produces the same workload every run.
+/// `swift run -c release forensiclens-benchmark` and forwards its
+/// arguments -- in particular `--json <path>`, which the CI workflow
+/// (`.github/workflows/benchmark.yml`) uses to get a machine-readable copy
+/// of the results for `scripts/benchmark/update-readme.sh` to turn into
+/// README.md's benchmark table. The `BenchmarkResult` / `BenchmarkReport`
+/// types that JSON is encoded as live in the `BenchmarkReporting` library
+/// target rather than here, so producer and consumer share one schema.
+///
+/// The images are generated in-process rather than read from disk (same
+/// deterministic noise generator the test suite's fixtures use) so the
+/// benchmark has no external inputs to manage and produces the same
+/// workload every run.
 
 /// A small, deterministic pseudo-random generator so repeated benchmark
 /// runs measure the same workload instead of noise-dependent variance.
@@ -39,11 +48,22 @@ func timeMilliseconds(_ body: () throws -> Void) rethrows -> Double {
     return Date().timeIntervalSince(start) * 1000
 }
 
+/// Parses `--json <path>` out of argv. Everything else this executable
+/// takes is fixed (sizes, analyzers), so this is the only flag worth a
+/// real parser for.
+func jsonOutputPath(_ arguments: [String]) -> String? {
+    guard let flagIndex = arguments.firstIndex(of: "--json"), arguments.index(after: flagIndex) < arguments.count else {
+        return nil
+    }
+    return arguments[arguments.index(after: flagIndex)]
+}
+
 let sizes = [(64, 64), (128, 128), (256, 256)]
 let config = ForensicLensConfig.default
 let ela = ELAAnalyzer()
 let metadata = MetadataAnalyzer()
 let clone = CloneDetectionAnalyzer()
+var jsonResults: [BenchmarkResult] = []
 
 /// Column alignment is done by hand with plain String concatenation
 /// instead of `String(format:)`'s `%@` specifier, since that depends on
@@ -73,4 +93,19 @@ for (width, height) in sizes {
         + padded(String(format: "%.2f", cloneTime), to: 14)
         + String(format: "%.4f", metadataTime)
     print(row)
+
+    let sizeLabel = "\(width)x\(height)"
+    jsonResults.append(BenchmarkResult(analyzer: "ELA", size: sizeLabel, pixels: width * height, milliseconds: elaTime))
+    jsonResults.append(BenchmarkResult(analyzer: "Clone Detection", size: sizeLabel, pixels: width * height, milliseconds: cloneTime))
+    jsonResults.append(BenchmarkResult(analyzer: "Metadata", size: sizeLabel, pixels: width * height, milliseconds: metadataTime))
+}
+
+if let jsonPath = jsonOutputPath(CommandLine.arguments) {
+    let isoFormatter = ISO8601DateFormatter()
+    let report = BenchmarkReport(generatedAt: isoFormatter.string(from: Date()), results: jsonResults)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let data = try encoder.encode(report)
+    try data.write(to: URL(fileURLWithPath: jsonPath))
+    print("\nWrote JSON results to \(jsonPath)")
 }

@@ -1,0 +1,53 @@
+name: Benchmark
+
+# Keeps the benchmark table in README.md current. Deliberately not run on
+# pull requests: benchmark numbers on shared CI runners are noisy enough
+# that this should be an explicit or main-branch-only action, not a PR
+# gate. See scripts/benchmark/run.sh and scripts/benchmark/update-readme.sh.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "scripts/benchmark/**"
+
+permissions:
+  contents: write
+
+jobs:
+  update-benchmark-table:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Swift toolchain
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.9"
+
+      - name: Build project
+        run: swift build -c release
+
+      - name: Run benchmark
+        run: scripts/benchmark/run.sh --json benchmark-results.json
+
+      - name: Update README benchmark table
+        run: scripts/benchmark/update-readme.sh --input benchmark-results.json
+
+      - name: Remove benchmark JSON scratch file
+        run: rm -f benchmark-results.json
+
+      - name: Commit and push if README changed
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "No benchmark changes; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Update benchmark results in README"
+          git push
