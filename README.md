@@ -1,4 +1,11 @@
 <p align="center">
+  <a href="https://github.com/Deipedra34/ForensicLens/actions/workflows/tests.yml"><img src="https://github.com/Deipedra34/ForensicLens/actions/workflows/tests.yml/badge.svg" alt="Build Status"></a>
+  <a href="https://codecov.io/gh/Deipedra34/ForensicLens"><img src="https://codecov.io/gh/Deipedra34/ForensicLens/branch/main/graph/badge.svg" alt="Code Coverage"></a>
+  <a href="https://swiftpackageindex.com/Deipedra34/ForensicLens"><img src="https://swiftpackageindex.com/api/packages/Deipedra34/ForensicLens/badge?type=swift-versions" alt="Swift Versions"></a>
+  <a href="https://swiftpackageindex.com/Deipedra34/ForensicLens"><img src="https://swiftpackageindex.com/api/packages/Deipedra34/ForensicLens/badge?type=platforms" alt="Platforms"></a>
+</p>
+
+<p align="center">
   <img src="docs/banner.svg" alt="ForensicLens — image manipulation detection, built with Swift" width="100%">
 </p>
 
@@ -272,6 +279,17 @@ swift test
 ```
 
 The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file.
+
+To generate the same coverage report as CI locally (Linux/macOS with the Swift toolchain's `llvm-cov`/`llvm-profdata`):
+
+```sh
+swift test --enable-code-coverage
+llvm-profdata merge -sparse .build/debug/codecov/*.profraw -o .build/debug/codecov/default.profdata
+llvm-cov export -format="lcov" \
+  .build/debug/forensiclensPackageTests.xctest \
+  -instr-profile .build/debug/codecov/default.profdata \
+  > coverage.lcov
+```
 
 ## License
 

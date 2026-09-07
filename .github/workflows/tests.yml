@@ -1,0 +1,94 @@
+name: Tests
+
+# Runs the test suite on every push and pull request, across macOS and
+# Linux. Unlike benchmark.yml (which only tracks performance on main and
+# is deliberately not a PR gate), this workflow exists specifically to
+# catch regressions before merge.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      # macOS runners ship Xcode's own Swift toolchain, which already
+      # satisfies this package's swift-tools-version:5.9 floor, so there's
+      # nothing to install there. Linux runners don't ship Swift at all.
+      #
+      # No swift-version pin: swift-actions/setup-swift installs the latest
+      # available toolchain, which is always >= this package's minimum.
+      # skip-verify-signature works around a currently-open upstream bug
+      # (swift-actions/setup-swift#798) where GPG verification of the
+      # downloaded toolchain fails with "No public key", unrelated to this
+      # project. The toolchain is still fetched over HTTPS from swift.org;
+      # this only skips the extra GPG check on top of that.
+      - name: Set up Swift toolchain (Linux)
+        if: runner.os == 'Linux'
+        uses: swift-actions/setup-swift@v3
+        with:
+          skip-verify-signature: true
+
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
+        run: swift test
+
+      # Coverage is only collected on Linux: one report per push/PR is
+      # enough for Codecov, and this keeps the macOS job as close as
+      # possible to what a contributor runs locally.
+      - name: Run tests with code coverage (Linux)
+        if: runner.os == 'Linux'
+        run: swift test --enable-code-coverage
+
+      # --- Coverage extraction (Linux only) ---
+      #
+      # `swift test --enable-code-coverage` leaves raw profiling data under
+      # .build/debug/codecov/*.profraw, one file per test executor. Before
+      # llvm-cov can read it, the raw profiles need merging into a single
+      # .profdata file.
+      - name: Merge raw coverage profiles
+        if: runner.os == 'Linux'
+        run: |
+          llvm-profdata merge -sparse \
+            .build/debug/codecov/*.profraw \
+            -o .build/debug/codecov/default.profdata
+
+      # Exports the merged profile as an lcov report (the format Codecov
+      # and most coverage tooling expect), pointing llvm-cov at the
+      # compiled test bundle so it can map coverage counters back to
+      # source lines. The bundle name matches this package's name
+      # ("forensiclens" in Package.swift) with "PackageTests.xctest"
+      # appended, which is SwiftPM's standard naming for it on Linux.
+      - name: Export lcov coverage report
+        if: runner.os == 'Linux'
+        run: |
+          llvm-cov export -format="lcov" \
+            .build/debug/forensiclensPackageTests.xctest \
+            -instr-profile .build/debug/codecov/default.profdata \
+            > coverage.lcov
+
+      - name: Upload coverage report artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.lcov
+
+      # Tokenless upload: codecov/codecov-action can upload coverage for
+      # public GitHub repositories without a token. If uploads start
+      # failing with an authentication error, add a CODECOV_TOKEN repo
+      # secret (from https://codecov.io/gh/Deipedra34/ForensicLens) and
+      # pass it here as `token: ${{ secrets.CODECOV_TOKEN }}`.
+      - name: Upload coverage to Codecov
+        if: runner.os == 'Linux'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.lcov
+          fail_ci_if_error: false

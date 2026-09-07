@@ -1,0 +1,18 @@
+# Swift Package Index manifest. See:
+# https://swiftpackageindex.com/SwiftPackageIndex/SPIManifest/documentation/spimanifest
+#
+# Note on platform coverage: SPI's compatibility matrix always attempts
+# every platform/Swift version combination itself and records a pass/fail
+# per cell — this file has no field that removes a cell from that matrix
+# (in particular, there's no supported way to pre-exclude iOS/watchOS/
+# tvOS/visionOS here). What actually determines a green matrix cell is
+# Package.swift: this package declares `platforms: [.macOS(.v12)]` and,
+# other than that Apple-platform floor, is pure Foundation and the
+# standard library with no Apple-only frameworks, so it also builds on
+# Linux. That's the same macOS + Linux matrix exercised on every push and
+# pull request in .github/workflows/tests.yml.
+version: 1
+builder:
+  configs:
+    - documentation_targets:
+        - ForensicLens
