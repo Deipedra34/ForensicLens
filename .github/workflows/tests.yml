@@ -81,14 +81,14 @@ jobs:
           name: coverage-report
           path: coverage.lcov
 
-      # Tokenless upload: codecov/codecov-action can upload coverage for
-      # public GitHub repositories without a token. If uploads start
-      # failing with an authentication error, add a CODECOV_TOKEN repo
-      # secret (from https://codecov.io/gh/Deipedra34/ForensicLens) and
-      # pass it here as `token: ${{ secrets.CODECOV_TOKEN }}`.
+      # Tokenless upload never got Codecov to actually record a report for
+      # this repo (the action step succeeded, but the repo stayed
+      # unrecognized on Codecov's end), so this now authenticates with the
+      # CODECOV_TOKEN repo secret from https://codecov.io/gh/Deipedra34/ForensicLens.
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux'
         uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.lcov
           fail_ci_if_error: false
