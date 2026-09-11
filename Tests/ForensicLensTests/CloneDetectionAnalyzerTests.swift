@@ -18,7 +18,14 @@ final class CloneDetectionAnalyzerTests: XCTestCase {
 
     func testDuplicatedPatchIsDetected() throws {
         let base = try Fixtures.noiseBuffer(width: 128, height: 128, seed: 42)
-        let withClone = try Fixtures.pastingPatch(of: 24, from: (x: 8, y: 8), to: (x: 90, y: 90), into: base)
+        // Both corners are multiples of the default blockStride (8), so a
+        // candidate block lands fully inside the pasted region at the same
+        // within-patch offset as a candidate in the source region -- an
+        // off-grid destination (e.g. (90, 90)) can paste the patch without
+        // any single stride-aligned block falling entirely inside it,
+        // which would leave no exact duplicate pair for the analyzer to
+        // find even though the image is genuinely cloned.
+        let withClone = try Fixtures.pastingPatch(of: 24, from: (x: 8, y: 8), to: (x: 88, y: 88), into: base)
         let image = try Fixtures.imageData(from: withClone)
 
         let finding = try CloneDetectionAnalyzer().analyze(image, config: .default)
