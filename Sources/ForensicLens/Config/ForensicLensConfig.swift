@@ -12,14 +12,21 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         /// Whether ELA runs as part of a combined report.
         public var enabled: Bool
 
-        /// The JPEG-style recompression quality used to generate the
-        /// comparison image, from 1 (heavy quantization) to 100 (almost
-        /// lossless). Lower values make ELA more sensitive but also
-        /// noisier; see `ELAAnalyzer`'s doc comment for the full trade-off.
-        public var qualityLevel: Int
+        /// The JPEG-style recompression qualities used to generate the
+        /// comparison images, each from 1 (heavy quantization) to 100
+        /// (almost lossless). ELA recompresses at every level in this list
+        /// and combines the results, rather than trusting a single
+        /// arbitrarily-chosen quality; see `ELAAnalyzer`'s doc comment for
+        /// why that combination is worth the extra recompression passes.
+        /// An empty (or otherwise invalid) list falls back to
+        /// `ELAAnalyzer.defaultQualityLevels` rather than crashing.
+        public var elaQualityLevels: [Int]
 
         /// A per-pixel luma error above this (0...255) is considered part
-        /// of a "hot" region rather than ordinary recompression noise.
+        /// of a "hot" region rather than ordinary recompression noise. This
+        /// is also the per-level bar a pixel's error must clear to count
+        /// toward that pixel's cross-level agreement -- see
+        /// `ELAAnalyzer.combine`'s doc comment.
         public var errorThreshold: Double
 
         /// The fraction of the image (0...1) that must fall in hot regions
@@ -27,9 +34,9 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         /// noting some recompression noise, which every JPEG has.
         public var flaggedRegionFraction: Double
 
-        public init(enabled: Bool, qualityLevel: Int, errorThreshold: Double, flaggedRegionFraction: Double) {
+        public init(enabled: Bool, elaQualityLevels: [Int], errorThreshold: Double, flaggedRegionFraction: Double) {
             self.enabled = enabled
-            self.qualityLevel = qualityLevel
+            self.elaQualityLevels = elaQualityLevels
             self.errorThreshold = errorThreshold
             self.flaggedRegionFraction = flaggedRegionFraction
         }
@@ -135,7 +142,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public static let `default` = ForensicLensConfig(
         ela: ELAConfig(
             enabled: true,
-            qualityLevel: 75,
+            elaQualityLevels: [70, 80, 90],
             errorThreshold: 28,
             flaggedRegionFraction: 0.015
         ),

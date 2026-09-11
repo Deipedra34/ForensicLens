@@ -118,8 +118,14 @@ public enum ConfigLoader {
         switch key {
         case "enabled":
             ela.enabled = try parseBool(key: key, value: value)
+        case "elaQualityLevels":
+            ela.elaQualityLevels = try parseIntList(key: key, value: value)
         case "qualityLevel":
-            ela.qualityLevel = try parseInt(key: key, value: value)
+            // Backward-compatible alias for the old single-quality config
+            // shape (pre-multi-quality ELA). A bare scalar here becomes a
+            // one-element `elaQualityLevels` list rather than failing to
+            // parse.
+            ela.elaQualityLevels = [try parseInt(key: key, value: value)]
         case "errorThreshold":
             ela.errorThreshold = try parseDouble(key: key, value: value)
         case "flaggedRegionFraction":
@@ -187,6 +193,31 @@ public enum ConfigLoader {
             throw ConfigError.invalidValue(key: key, value: value)
         }
         return parsed
+    }
+
+    /// Parses either an inline `[a, b, c]` list of integers, or a single
+    /// bare integer, into an `[Int]`. The bare-scalar form exists so
+    /// `elaQualityLevels: 75` -- e.g. a config hand-edited by someone still
+    /// thinking in the old single-quality shape -- parses as `[75]`
+    /// instead of throwing.
+    private static func parseIntList(key: String, value: String) throws -> [Int] {
+        let trimmed = value.trimmingWhitespace()
+        guard trimmed.hasPrefix("[") else {
+            return [try parseInt(key: key, value: trimmed)]
+        }
+        guard trimmed.hasSuffix("]") else {
+            throw ConfigError.invalidValue(key: key, value: value)
+        }
+        var inner = trimmed
+        inner.removeFirst()
+        inner.removeLast()
+        guard !inner.trimmingWhitespace().isEmpty else { return [] }
+        return try inner.split(separator: ",").map { entry in
+            guard let parsed = Int(entry.trimmingWhitespace()) else {
+                throw ConfigError.invalidValue(key: key, value: value)
+            }
+            return parsed
+        }
     }
 
     private static func parseStringList(key: String, value: String) throws -> [String] {

@@ -10,11 +10,19 @@ ela:
   # Whether Error Level Analysis runs as part of a combined report.
   enabled: true
 
-  # JPEG-style recompression quality used for the ELA comparison pass,
-  # 1 (heavy quantization, noisy but sensitive) to 100 (near-lossless,
-  # clean but can miss subtle edits). 75 mirrors a typical "save for web"
-  # export quality.
-  qualityLevel: 75
+  # JPEG-style recompression qualities used for the ELA comparison pass,
+  # each 1 (heavy quantization, noisy but sensitive) to 100 (near-lossless,
+  # clean but can miss subtle edits). ELA recompresses at every quality
+  # listed here and combines the results, weighted toward whichever
+  # regions are hot *consistently* across all of them -- a region that
+  # only shows high error at one arbitrarily-chosen quality is much
+  # weaker evidence than one that shows it at every quality tried, and a
+  # single fixed quality can't tell the two apart. [70, 80, 90] spans the
+  # range of "save for web" export qualities most photo editors default
+  # to. An empty list falls back to this same default rather than
+  # erroring. Scanning at N qualities costs roughly N times the work of a
+  # single-quality scan.
+  elaQualityLevels: [70, 80, 90]
 
   # A reporting cell's mean pixel error (0-255 scale) at or above this is
   # considered a "hot" region rather than ordinary recompression noise.

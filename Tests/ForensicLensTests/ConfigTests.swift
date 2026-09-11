@@ -5,11 +5,11 @@ final class ConfigTests: XCTestCase {
     func testParsingOverridesDefaultsOnlyForMentionedKeys() throws {
         let yaml = """
         ela:
-          qualityLevel: 50
+          elaQualityLevels: [50]
         """
         let config = try ConfigLoader.parse(yaml)
 
-        XCTAssertEqual(config.ela.qualityLevel, 50)
+        XCTAssertEqual(config.ela.elaQualityLevels, [50])
         // Untouched keys, including in an untouched section, should still
         // match the package defaults.
         XCTAssertEqual(config.ela.errorThreshold, ForensicLensConfig.default.ela.errorThreshold)
@@ -22,7 +22,7 @@ final class ConfigTests: XCTestCase {
         # Full override of every section.
         ela:
           enabled: false
-          qualityLevel: 40
+          elaQualityLevels: [40, 60]
           errorThreshold: 15.5
           flaggedRegionFraction: 0.02
 
@@ -43,7 +43,7 @@ final class ConfigTests: XCTestCase {
         let config = try ConfigLoader.parse(yaml)
 
         XCTAssertEqual(config.ela.enabled, false)
-        XCTAssertEqual(config.ela.qualityLevel, 40)
+        XCTAssertEqual(config.ela.elaQualityLevels, [40, 60])
         XCTAssertEqual(config.ela.errorThreshold, 15.5)
         XCTAssertEqual(config.ela.flaggedRegionFraction, 0.02)
 
@@ -108,13 +108,13 @@ final class ConfigTests: XCTestCase {
 
         ela:
           # a nested comment
-          qualityLevel: 60
+          elaQualityLevels: [60]
 
           errorThreshold: 20 # trailing comment
         """
         let config = try ConfigLoader.parse(yaml)
 
-        XCTAssertEqual(config.ela.qualityLevel, 60)
+        XCTAssertEqual(config.ela.elaQualityLevels, [60])
         XCTAssertEqual(config.ela.errorThreshold, 20)
     }
 
@@ -123,7 +123,40 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(config.ela.enabled)
         XCTAssertTrue(config.metadata.enabled)
         XCTAssertTrue(config.cloneDetection.enabled)
-        XCTAssertGreaterThan(config.ela.qualityLevel, 0)
-        XCTAssertLessThanOrEqual(config.ela.qualityLevel, 100)
+        XCTAssertFalse(config.ela.elaQualityLevels.isEmpty)
+        for level in config.ela.elaQualityLevels {
+            XCTAssertGreaterThan(level, 0)
+            XCTAssertLessThanOrEqual(level, 100)
+        }
+    }
+
+    // MARK: - Backward-compatible single-value quality config
+
+    /// The old config shape (pre-multi-quality ELA) used a single scalar
+    /// `qualityLevel` key. `ConfigLoader` still accepts it as an alias for
+    /// `elaQualityLevels`, wrapping the scalar into a one-element list, so
+    /// an old `forensiclens.yaml` doesn't fail to parse after this upgrade.
+    func testLegacyQualityLevelKeyParsesAsOneElementList() throws {
+        let yaml = """
+        ela:
+          qualityLevel: 55
+        """
+        let config = try ConfigLoader.parse(yaml)
+
+        XCTAssertEqual(config.ela.elaQualityLevels, [55])
+    }
+
+    /// `elaQualityLevels` itself also accepts a bare scalar (not just the
+    /// `[a, b, c]` list form), for the same reason: someone hand-editing
+    /// the new key while still thinking in single-quality terms shouldn't
+    /// get a parse error.
+    func testElaQualityLevelsAcceptsBareScalar() throws {
+        let yaml = """
+        ela:
+          elaQualityLevels: 65
+        """
+        let config = try ConfigLoader.parse(yaml)
+
+        XCTAssertEqual(config.ela.elaQualityLevels, [65])
     }
 }
