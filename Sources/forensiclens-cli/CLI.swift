@@ -47,7 +47,7 @@ enum CLI {
             switch command {
             case "report":
                 only = nil
-            case "ela", "metadata", "clone":
+            case "ela", "metadata", "clone", "doublecompression":
                 only = [command]
             default:
                 eprint("Error: unknown command \"\(command)\".")
@@ -246,14 +246,15 @@ enum CLI {
           forensiclens-cli batch <directory> [options]
 
         COMMANDS:
-          report      Run every enabled analyzer and print a combined report.
-          ela         Run only Error Level Analysis.
-          metadata    Run only EXIF/metadata analysis.
-          clone       Run only copy-move (clone) detection.
-          batch       Scan a directory of images and print one summary report.
-          help        Show this message.
+          report              Run every enabled analyzer and print a combined report.
+          ela                 Run only Error Level Analysis.
+          metadata            Run only EXIF/metadata analysis.
+          clone               Run only copy-move (clone) detection.
+          doublecompression   Run only double JPEG compression detection.
+          batch               Scan a directory of images and print one summary report.
+          help                Show this message.
 
-        OPTIONS (report / ela / metadata / clone):
+        OPTIONS (report / ela / metadata / clone / doublecompression):
           --json           Print the report as JSON instead of plain text.
           --config <path>  Path to a forensiclens.yaml config file.
                             Defaults to ./forensiclens.yaml; missing files

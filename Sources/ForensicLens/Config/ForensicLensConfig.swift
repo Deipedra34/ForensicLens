@@ -127,14 +127,51 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         }
     }
 
+    /// Settings for `DoubleCompressionAnalyzer`.
+    public struct DoubleCompressionConfig: Codable, Equatable, Sendable {
+        /// Whether double-compression detection runs as part of a combined
+        /// report.
+        public var enabled: Bool
+
+        /// Row (0...7) of the 8x8 DCT coefficient this analyzer builds its
+        /// histogram from. `(1, 1)` is a low-frequency AC term: high enough
+        /// that it isn't dominated by the DC (average brightness) term, but
+        /// low enough that it still carries plenty of energy in ordinary
+        /// photo content for the histogram to be worth analyzing. Clamped
+        /// to 0...7 if a config file supplies something out of range.
+        public var acCoefficientRow: Int
+
+        /// Column (0...7) of the coefficient position; see
+        /// `acCoefficientRow`. Together `(acCoefficientRow, acCoefficientColumn)`
+        /// name one of the 64 positions in an 8x8 DCT block.
+        public var acCoefficientColumn: Int
+
+        /// How much of the coefficient histogram's spectral energy has to
+        /// concentrate in a single frequency, on a 0...1 scale, before that
+        /// histogram counts as showing a periodic double-compression comb
+        /// rather than an ordinary single-compression histogram's smooth
+        /// shape. Higher is stricter (fewer false positives, but subtler
+        /// double-compression evidence can slip under it).
+        public var periodicityThreshold: Double
+
+        public init(enabled: Bool, acCoefficientRow: Int, acCoefficientColumn: Int, periodicityThreshold: Double) {
+            self.enabled = enabled
+            self.acCoefficientRow = acCoefficientRow
+            self.acCoefficientColumn = acCoefficientColumn
+            self.periodicityThreshold = periodicityThreshold
+        }
+    }
+
     public var ela: ELAConfig
     public var metadata: MetadataConfig
     public var cloneDetection: CloneDetectionConfig
+    public var doubleCompression: DoubleCompressionConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
+        self.doubleCompression = doubleCompression
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -164,6 +201,12 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
             minimumBlockVariance: 20,
             similarityThreshold: 6,
             minimumBlockDistance: 24
+        ),
+        doubleCompression: DoubleCompressionConfig(
+            enabled: true,
+            acCoefficientRow: 1,
+            acCoefficientColumn: 1,
+            periodicityThreshold: 0.24
         )
     )
 }

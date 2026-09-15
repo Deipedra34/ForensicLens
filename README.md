@@ -11,19 +11,20 @@
 
 # ForensicLens
 
-A Swift library and CLI for spotting signs of digital manipulation in still images. It runs three independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, and copy-move/clone detection) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
+A Swift library and CLI for spotting signs of digital manipulation in still images. It runs four independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, and double JPEG compression detection) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
 
 Pure Swift and C, no Apple-only frameworks. Builds and tests on macOS and Linux.
 
-## Why three techniques instead of one
+## Why four techniques instead of one
 
 None of these methods are conclusive on their own, and each one is blind to a different kind of edit.
 
 - **ELA** catches localized edits in a JPEG's compression history: a pasted patch that hasn't been through the same recompression as everything around it. It has nothing to say about a clean copy-move that happened within a single compression pass, though.
 - **Metadata analysis** catches evidence left behind by an editing tool or an impossible timestamp, but a careful edit that strips or fakes EXIF just sails right through it.
 - **Clone detection** catches duplicated regions no matter what the compression history looks like, but it's blind to edits that don't involve copying part of the same image.
+- **Double compression detection** catches whether the file was JPEG-compressed *twice* -- the fingerprint left by opening an already-compressed photo, editing it, and saving it again -- even when the edit itself was a clean, precisely-aligned copy-move that leaves ELA and clone detection with nothing unusual to see. It has nothing to say about a first-generation, once-compressed original, edited or not.
 
-Run all three and combine the results, and you catch a wider range of edits than any single technique would on its own. That's the whole point of `SuspicionScorer`.
+Run all four and combine the results, and you catch a wider range of edits than any single technique would on its own. That's the whole point of `SuspicionScorer`.
 
 ## Architecture
 
@@ -47,6 +48,7 @@ flowchart TB
         ELA[ELAAnalyzer]
         Meta[MetadataAnalyzer]
         Clone[CloneDetectionAnalyzer]
+        DoubleComp[DoubleCompressionAnalyzer]
         Scorer[SuspicionScorer]
         Config[ForensicLensConfig]
     end
@@ -62,15 +64,19 @@ flowchart TB
     ImageData --> ELA
     ImageData --> Meta
     ImageData --> Clone
+    ImageData --> DoubleComp
     Analyzer -.conforms.-> ELA
     Analyzer -.conforms.-> Meta
     Analyzer -.conforms.-> Clone
+    Analyzer -.conforms.-> DoubleComp
     Config --> ELA
     Config --> Meta
     Config --> Clone
+    Config --> DoubleComp
     ELA --> Scorer
     Meta --> Scorer
     Clone --> Scorer
+    DoubleComp --> Scorer
     Scorer --> Report
 ```
 
@@ -85,6 +91,7 @@ Analyzers themselves are pluggable through the `Analyzer` protocol. `ForensicLen
 | Error Level Analysis | Regions with a compression-error signature inconsistent with the rest of the image | Yes | No |
 | EXIF / Metadata | Editing-software signatures, impossible or drifted timestamps, missing camera fields, cross-field inconsistencies (GPS vs. capture timestamp, GPS vs. camera identity, GPS altitude sign, editing software vs. unedited-camera claim) | No | Yes (JPEG only) |
 | Copy-Move (Clone) Detection | Duplicated blocks pasted elsewhere in the same image | Yes | No |
+| Double JPEG Compression Detection | A periodic pattern in a DCT coefficient's histogram, left behind when a JPEG is decompressed, edited, and re-compressed a second time | Yes (JPEG only) | No |
 
 | Capability | Status |
 |---|---|
@@ -125,14 +132,15 @@ forensiclens-cli <command> <image-path> [--json] [--config <path>]
 forensiclens-cli batch <directory> [options]
 
 COMMANDS:
-  report      Run every enabled analyzer and print a combined report.
-  ela         Run only Error Level Analysis.
-  metadata    Run only EXIF/metadata analysis.
-  clone       Run only copy-move (clone) detection.
-  batch       Scan a directory of images and print one summary report.
-  help        Show usage.
+  report              Run every enabled analyzer and print a combined report.
+  ela                 Run only Error Level Analysis.
+  metadata            Run only EXIF/metadata analysis.
+  clone               Run only copy-move (clone) detection.
+  doublecompression   Run only double JPEG compression detection.
+  batch               Scan a directory of images and print one summary report.
+  help                Show usage.
 
-OPTIONS (report / ela / metadata / clone):
+OPTIONS (report / ela / metadata / clone / doublecompression):
   --json           Print the report as JSON instead of plain text.
   --config <path>  Path to a forensiclens.yaml config file.
                     Defaults to ./forensiclens.yaml; a missing file
@@ -186,6 +194,8 @@ Overall suspicion score: 78/100 (likely manipulated)
 [metadata] score 35/100 -- 1 metadata anomaly found.
   - Software tag reports "Adobe Photoshop 25.0", which matches known editing tool signature "photoshop".
 [clone] score 0/100 -- No duplicated regions detected.
+[doublecompression] score 42/100 -- Periodic DCT coefficient pattern detected at coefficient (1,1); this image's pixel data is consistent with having been JPEG-compressed twice.
+  - Histogram of DCT coefficient (1,1), sampled on an 8x8 block grid offset by (0,0) px, shows a periodic double-peak pattern with periodicity strength 0.31 (threshold 0.24) -- periodic DCT coefficient pattern detected; image was likely re-compressed after editing.
 ```
 
 ### Library usage
@@ -230,6 +240,12 @@ cloneDetection:
   minimumBlockVariance: 20
   similarityThreshold: 6
   minimumBlockDistance: 24
+
+doubleCompression:
+  enabled: true
+  acCoefficientRow: 1     # row (0-7) of the 8x8 DCT coefficient to histogram
+  acCoefficientColumn: 1  # column (0-7) of that coefficient
+  periodicityThreshold: 0.24 # fraction of histogram spectral energy in one peak that counts as periodic
 ```
 
 ## Per-analyzer implementation notes
@@ -239,10 +255,11 @@ Deeper trade-off discussion lives in [`docs/algorithms.md`](docs/algorithms.md) 
 - **ELA** doesn't rely on a real JPEG codec. It simulates a JPEG-style lossy recompression pass (block DCT, quantize at a configured quality, dequantize, inverse DCT) directly against the decoded pixel buffer, which is the exact lossy step ELA actually depends on. That's what lets it run against any format this package can decode, not just JPEG. Rather than trusting a single arbitrarily-chosen quality, it recompresses at every quality listed in `elaQualityLevels` (default `[70, 80, 90]`) and combines the resulting error maps: each pixel's combined error is scaled by the *fraction* of quality levels that independently flagged it as an outlier, so a region that's only hot at one quality level gets suppressed toward the noise floor, while a region that's hot at every configured level keeps its full weight. That cross-level consistency, not the single noisiest level, is what drives the suspicion score -- see `ELAAnalyzer.combine`'s doc comment for the full reasoning. Scanning at N quality levels costs roughly N times the work of the old single-quality pass.
 - **Metadata analysis** reads EXIF straight out of the raw file bytes, from the `APP1` marker segment, so it works even on JPEGs whose pixel data this package can't decode. Beyond flagging individual fields (missing, malformed, editing-software signatures), it also runs cross-field checks that compare related values against each other, since two contradicting fields are a stronger tampering signal than either looks alone: GPS timestamp vs. `DateTimeOriginal` (default 5-minute tolerance -- see `MetadataAnomaly.gpsTimestampDrift`'s doc comment for why this assumes both clocks read the same wall-clock time, and its limits on cameras set to local time), `DateTimeDigitized` vs. `DateTimeOriginal` drift (default 5 minutes), GPS location present without camera Make/Model or vice versa (asymmetric weighting -- GPS without an identified device is the more surprising direction), `GPSAltitude` decoding negative without `GPSAltitudeRef` indicating "below sea level", and a `Software` tag naming an editor while Make/Model/Lens and an unchanged `ModifyDate` still claim an untouched camera original.
 - **Clone detection** filters out flat, low-variance blocks before comparing anything. Skip that step and a clear sky or a plain wall would "match" itself thousands of times over and swamp any real finding.
+- **Double compression detection** looks for the classic double-JPEG-compression signature: it splits the decoded image into an 8x8 grid of luma blocks (JPEG's own block size), runs a forward DCT on each one, and builds a histogram of one chosen low-frequency AC coefficient (`(1,1)` by default) across every block. A JPEG compressed once quantizes that coefficient to multiples of a single step, which just thins the histogram out evenly. Compressing a *second* time at a different quality requantizes values that are already multiples of the first step to multiples of a second, generally different one -- and because the two steps don't line up, some of the final histogram's non-empty bins end up noticeably fatter or thinner than their neighbors, in a pattern that repeats with a period tied to the ratio between the two steps. This analyzer removes the histogram's broad, natural envelope (a small local moving average) and runs a discrete Fourier transform over what's left, purely to see whether one frequency's energy dominates -- a strong single peak means a periodic comb is present; a flat spectrum means the histogram never had one. Since a crop between the two compressions shifts JPEG's 8x8 block grid relative to the file's own pixel `(0, 0)`, it repeats this scan at several candidate pixel offsets and keeps whichever one shows the strongest periodicity. Being a JPEG-quantization-specific signal, it reports "not applicable" on any non-JPEG input rather than a false negative. See `DoubleCompressionAnalyzer` and `DCTPeriodicityAnalysis`'s doc comments for the full reasoning.
 
 ## Image format support
 
-Decoding lives entirely in `CStbImage` (C) behind the `ImageDecoding` module, and currently covers uncompressed BMP and binary PPM/PGM. That's enough to build every test fixture in-process without shipping binary test assets or depending on a real JPEG decoder. JPEG *files* are recognized by magic number (so metadata analysis works on them), but JPEG *pixel* decoding is a documented stub (`cstbi_decode_jpeg_baseline`). ELA and clone detection require decoded pixels, so they'll throw `AnalyzerError.unsupportedInput` on a JPEG until a real decoder gets dropped in behind that one seam.
+Decoding lives entirely in `CStbImage` (C) behind the `ImageDecoding` module, and currently covers uncompressed BMP and binary PPM/PGM. That's enough to build every test fixture in-process without shipping binary test assets or depending on a real JPEG decoder. JPEG *files* are recognized by magic number (so metadata analysis works on them), but JPEG *pixel* decoding is a documented stub (`cstbi_decode_jpeg_baseline`). ELA, clone detection, and double compression detection require decoded pixels, so they'll throw `AnalyzerError.unsupportedInput` on a JPEG until a real decoder gets dropped in behind that one seam.
 
 ## Benchmarking
 
@@ -278,7 +295,7 @@ ELA scales roughly linearly with pixel count, since it's a fixed amount of work 
 swift test
 ```
 
-The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file.
+The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file.
 
 To generate the same coverage report as CI locally (Linux/macOS with the Swift toolchain's `llvm-cov`/`llvm-profdata`):
 

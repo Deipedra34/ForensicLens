@@ -14,11 +14,12 @@ public struct ForensicLensEngine: Sendable {
     private let analyzers: [any Analyzer]
 
     /// Creates an engine with the given config and the full set of built-in
-    /// analyzers (ELA, metadata, clone detection). Individual analyzers are
-    /// still subject to their `enabled` flag in `config` at run time.
+    /// analyzers (ELA, metadata, clone detection, double-compression
+    /// detection). Individual analyzers are still subject to their
+    /// `enabled` flag in `config` at run time.
     public init(config: ForensicLensConfig = .default) {
         self.config = config
-        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer()]
+        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer()]
     }
 
     /// Runs every enabled analyzer against `image` and combines the results
@@ -60,6 +61,7 @@ public struct ForensicLensEngine: Sendable {
         case "ela": return config.ela.enabled
         case "metadata": return config.metadata.enabled
         case "clone": return config.cloneDetection.enabled
+        case "doublecompression": return config.doubleCompression.enabled
         default: return true
         }
     }

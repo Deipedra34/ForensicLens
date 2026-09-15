@@ -109,6 +109,8 @@ public enum ConfigLoader {
             try applyMetadata(key: key, value: value, to: &config.metadata)
         case "cloneDetection":
             try applyCloneDetection(key: key, value: value, to: &config.cloneDetection)
+        case "doubleCompression":
+            try applyDoubleCompression(key: key, value: value, to: &config.doubleCompression)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -170,6 +172,21 @@ public enum ConfigLoader {
             clone.minimumBlockDistance = try parseInt(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "cloneDetection", key: key)
+        }
+    }
+
+    private static func applyDoubleCompression(key: String, value: String, to doubleCompression: inout ForensicLensConfig.DoubleCompressionConfig) throws {
+        switch key {
+        case "enabled":
+            doubleCompression.enabled = try parseBool(key: key, value: value)
+        case "acCoefficientRow":
+            doubleCompression.acCoefficientRow = try parseInt(key: key, value: value)
+        case "acCoefficientColumn":
+            doubleCompression.acCoefficientColumn = try parseInt(key: key, value: value)
+        case "periodicityThreshold":
+            doubleCompression.periodicityThreshold = try parseDouble(key: key, value: value)
+        default:
+            throw ConfigError.unknownKey(section: "doubleCompression", key: key)
         }
     }
 

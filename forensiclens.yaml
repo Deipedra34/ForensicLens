@@ -92,3 +92,24 @@ cloneDetection:
   # Minimum pixel distance required between two matched blocks' positions,
   # so a block never trivially "matches" its own near neighbors.
   minimumBlockDistance: 24
+
+doubleCompression:
+  # Whether double JPEG compression detection runs as part of a combined
+  # report.
+  enabled: true
+
+  # Row (0-7) of the 8x8 DCT coefficient this analyzer histograms across
+  # every block. (1,1) is a low-frequency AC term: high enough that it
+  # isn't dominated by the DC (average brightness) term, low enough that
+  # ordinary photo content still gives it plenty of energy to analyze.
+  acCoefficientRow: 1
+
+  # Column (0-7) of the coefficient position; together with
+  # acCoefficientRow this names one of the 64 positions in an 8x8 DCT block.
+  acCoefficientColumn: 1
+
+  # How much of the coefficient histogram's spectral energy has to
+  # concentrate in a single frequency (0-1 scale) before it counts as a
+  # periodic double-compression "comb" rather than an ordinary single-
+  # compression histogram's smooth shape. Higher is stricter.
+  periodicityThreshold: 0.24
