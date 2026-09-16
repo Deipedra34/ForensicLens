@@ -63,10 +63,21 @@ jobs:
       # .build/debug/codecov/*.profraw, one file per test executor. Before
       # llvm-cov can read it, the raw profiles need merging into a single
       # .profdata file.
+      #
+      # setup-swift installs the toolchain through swiftly, which only adds
+      # its own proxy directory (thin symlinks for whatever the toolchain
+      # happens to provide, resolved lazily at call time) to PATH -- not
+      # reliably the toolchain's real usr/bin. That's fine for `swift`
+      # itself, but bare `llvm-profdata`/`llvm-cov` have been seen to 127
+      # ("command not found") depending on how that proxy resolves, so this
+      # asks swiftly directly for the active toolchain's real install
+      # location and calls the tools by their full path instead of trusting
+      # PATH to have them.
       - name: Merge raw coverage profiles
         if: runner.os == 'Linux'
         run: |
-          llvm-profdata merge -sparse \
+          TOOLCHAIN_BIN="$(swiftly use --print-location)/usr/bin"
+          "$TOOLCHAIN_BIN/llvm-profdata" merge -sparse \
             .build/debug/codecov/*.profraw \
             -o .build/debug/codecov/default.profdata
 
@@ -79,7 +90,8 @@ jobs:
       - name: Export lcov coverage report
         if: runner.os == 'Linux'
         run: |
-          llvm-cov export -format="lcov" \
+          TOOLCHAIN_BIN="$(swiftly use --print-location)/usr/bin"
+          "$TOOLCHAIN_BIN/llvm-cov" export -format="lcov" \
             .build/debug/forensiclensPackageTests.xctest \
             -instr-profile .build/debug/codecov/default.profdata \
             > coverage.lcov
