@@ -1,8 +1,8 @@
 <p align="center">
   <a href="https://github.com/Deipedra34/ForensicLens/actions/workflows/tests.yml"><img src="https://github.com/Deipedra34/ForensicLens/actions/workflows/tests.yml/badge.svg" alt="Build Status"></a>
   <a href="https://codecov.io/gh/Deipedra34/ForensicLens"><img src="https://codecov.io/gh/Deipedra34/ForensicLens/branch/main/graph/badge.svg" alt="Code Coverage"></a>
-  <a href="https://swiftpackageindex.com/Deipedra34/ForensicLens"><img src="https://swiftpackageindex.com/api/packages/Deipedra34/ForensicLens/badge?type=swift-versions" alt="Swift Versions"></a>
-  <a href="https://swiftpackageindex.com/Deipedra34/ForensicLens"><img src="https://swiftpackageindex.com/api/packages/Deipedra34/ForensicLens/badge?type=platforms" alt="Platforms"></a>
+  <a href="https://swiftpackageindex.com/Deipedra34/ForensicLens"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FDeipedra34%2FForensicLens%2Fbadge%3Ftype%3Dswift-versions" alt="Swift Versions"></a>
+  <a href="https://swiftpackageindex.com/Deipedra34/ForensicLens"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FDeipedra34%2FForensicLens%2Fbadge%3Ftype%3Dplatforms" alt="Platforms"></a>
 </p>
 
 <p align="center">
