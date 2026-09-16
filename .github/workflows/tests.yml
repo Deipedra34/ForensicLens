@@ -64,25 +64,26 @@ jobs:
       # llvm-cov can read it, the raw profiles need merging into a single
       # .profdata file.
       #
-      # setup-swift installs the toolchain through swiftly, which only adds
-      # its own proxy directory (thin symlinks for whatever the toolchain
-      # happens to provide, resolved lazily at call time) to PATH -- not
-      # reliably the toolchain's real usr/bin. That's fine for `swift`
-      # itself, but bare `llvm-profdata`/`llvm-cov` have been seen to 127
-      # ("command not found") depending on how that proxy resolves, so this
-      # asks swiftly directly for the active toolchain's real install
-      # location and calls the tools by their full path instead of trusting
-      # PATH to have them.
+      # setup-swift installs the toolchain through swiftly. `swift` itself
+      # stays on PATH for the rest of the job, but empirically (confirmed by
+      # tracing a failed run) neither the `swiftly` command nor a directory
+      # containing bare `llvm-profdata`/`llvm-cov` reliably does -- so this
+      # doesn't trust PATH, or even `swiftly`, for any of it. It searches
+      # the filesystem directly for the real toolchain binaries instead:
+      # swiftly's toolchains live under ~/.local/share/swiftly/toolchains,
+      # and setup-swift's own tool cache is under /opt/hostedtoolcache; one
+      # of those two always has them on every runner image this has been
+      # seen to fail on.
       - name: Merge raw coverage profiles
         if: runner.os == 'Linux'
         run: |
-          set -x
-          which swiftly || true
-          swiftly use --print-location || true
-          TOOLCHAIN_BIN="$(swiftly use --print-location)/usr/bin"
-          echo "TOOLCHAIN_BIN=$TOOLCHAIN_BIN"
-          ls -la "$TOOLCHAIN_BIN" || true
-          "$TOOLCHAIN_BIN/llvm-profdata" merge -sparse \
+          LLVM_PROFDATA="$(find "$HOME" /opt/hostedtoolcache -name llvm-profdata -type f 2>/dev/null | head -1)"
+          if [ -z "$LLVM_PROFDATA" ]; then
+            echo "::error::could not locate llvm-profdata under \$HOME or /opt/hostedtoolcache"
+            exit 1
+          fi
+          echo "Using $LLVM_PROFDATA"
+          "$LLVM_PROFDATA" merge -sparse \
             .build/debug/codecov/*.profraw \
             -o .build/debug/codecov/default.profdata
 
@@ -91,12 +92,19 @@ jobs:
       # compiled test bundle so it can map coverage counters back to
       # source lines. The bundle name matches this package's name
       # ("forensiclens" in Package.swift) with "PackageTests.xctest"
-      # appended, which is SwiftPM's standard naming for it on Linux.
+      # appended, which is SwiftPM's standard naming for it on Linux. See
+      # the previous step's comment for why this is looked up by searching
+      # the filesystem rather than trusting PATH or `swiftly`.
       - name: Export lcov coverage report
         if: runner.os == 'Linux'
         run: |
-          TOOLCHAIN_BIN="$(swiftly use --print-location)/usr/bin"
-          "$TOOLCHAIN_BIN/llvm-cov" export -format="lcov" \
+          LLVM_COV="$(find "$HOME" /opt/hostedtoolcache -name llvm-cov -type f 2>/dev/null | head -1)"
+          if [ -z "$LLVM_COV" ]; then
+            echo "::error::could not locate llvm-cov under \$HOME or /opt/hostedtoolcache"
+            exit 1
+          fi
+          echo "Using $LLVM_COV"
+          "$LLVM_COV" export -format="lcov" \
             .build/debug/forensiclensPackageTests.xctest \
             -instr-profile .build/debug/codecov/default.profdata \
             > coverage.lcov
