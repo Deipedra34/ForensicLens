@@ -42,6 +42,22 @@ func makeNoiseImage(width: Int, height: Int) throws -> ImageData {
     return try ImageData.load(bytes)
 }
 
+/// Same synthetic noise buffer as `makeNoiseImage`, but tagged as `.jpeg`
+/// instead of round-tripping through PPM. `DoubleCompressionAnalyzer` only
+/// does its real (DCT/histogram) work on JPEG-tagged input -- everything
+/// else is a cheap "not applicable" early return -- so benchmarking it
+/// against a PPM-tagged image the way the other analyzers are benchmarked
+/// would measure that early return instead of the actual cost.
+func makeNoiseJPEGImage(width: Int, height: Int) throws -> ImageData {
+    var generator = SeededGenerator(seed: UInt64(width * 31 + height))
+    var pixels = [UInt8](repeating: 0, count: width * height * 3)
+    for i in 0..<pixels.count {
+        pixels[i] = generator.nextByte()
+    }
+    let buffer = try PixelBuffer(width: width, height: height, channels: 3, pixels: pixels)
+    return ImageData(rawBytes: [0xFF, 0xD8, 0xFF, 0xD9], pixels: buffer, format: .jpeg)
+}
+
 func timeMilliseconds(_ body: () throws -> Void) rethrows -> Double {
     let start = Date()
     try body()
@@ -63,6 +79,7 @@ let config = ForensicLensConfig.default
 let ela = ELAAnalyzer()
 let metadata = MetadataAnalyzer()
 let clone = CloneDetectionAnalyzer()
+let doubleCompression = DoubleCompressionAnalyzer()
 var jsonResults: [BenchmarkResult] = []
 
 /// Column alignment is done by hand with plain String concatenation
@@ -75,13 +92,15 @@ func padded(_ text: String, to width: Int) -> String {
 
 print("ForensicLens benchmark")
 print("=======================")
-print(padded("size", to: 12) + padded("pixels", to: 10) + padded("ela (ms)", to: 14) + padded("clone (ms)", to: 14) + "metadata (ms)")
+print(padded("size", to: 12) + padded("pixels", to: 10) + padded("ela (ms)", to: 14) + padded("clone (ms)", to: 14) + padded("doublecomp (ms)", to: 18) + "metadata (ms)")
 
 for (width, height) in sizes {
     let image = try makeNoiseImage(width: width, height: height)
+    let jpegImage = try makeNoiseJPEGImage(width: width, height: height)
 
     let elaTime = try timeMilliseconds { _ = try ela.analyze(image, config: config) }
     let cloneTime = try timeMilliseconds { _ = try clone.analyze(image, config: config) }
+    let doubleCompressionTime = try timeMilliseconds { _ = try doubleCompression.analyze(jpegImage, config: config) }
     // MetadataAnalyzer only reads file headers, so it's timed against the
     // same buffer even though this synthetic PPM carries no EXIF -- the
     // point is to show its cost is essentially zero next to pixel analysis.
@@ -91,12 +110,14 @@ for (width, height) in sizes {
         + padded("\(width * height)", to: 10)
         + padded(String(format: "%.2f", elaTime), to: 14)
         + padded(String(format: "%.2f", cloneTime), to: 14)
+        + padded(String(format: "%.2f", doubleCompressionTime), to: 18)
         + String(format: "%.4f", metadataTime)
     print(row)
 
     let sizeLabel = "\(width)x\(height)"
     jsonResults.append(BenchmarkResult(analyzer: "ELA", size: sizeLabel, pixels: width * height, milliseconds: elaTime))
     jsonResults.append(BenchmarkResult(analyzer: "Clone Detection", size: sizeLabel, pixels: width * height, milliseconds: cloneTime))
+    jsonResults.append(BenchmarkResult(analyzer: "Double Compression", size: sizeLabel, pixels: width * height, milliseconds: doubleCompressionTime))
     jsonResults.append(BenchmarkResult(analyzer: "Metadata", size: sizeLabel, pixels: width * height, milliseconds: metadataTime))
 }
 
