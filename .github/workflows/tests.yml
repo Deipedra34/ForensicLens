@@ -76,7 +76,12 @@ jobs:
       - name: Merge raw coverage profiles
         if: runner.os == 'Linux'
         run: |
+          set -x
+          which swiftly || true
+          swiftly use --print-location || true
           TOOLCHAIN_BIN="$(swiftly use --print-location)/usr/bin"
+          echo "TOOLCHAIN_BIN=$TOOLCHAIN_BIN"
+          ls -la "$TOOLCHAIN_BIN" || true
           "$TOOLCHAIN_BIN/llvm-profdata" merge -sparse \
             .build/debug/codecov/*.profraw \
             -o .build/debug/codecov/default.profdata
