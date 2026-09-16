@@ -22,23 +22,28 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      # No swift-version pin: swift-actions/setup-swift installs the latest
-      # available toolchain, which is always >= this package's minimum
-      # (swift-tools-version:5.9 in Package.swift, which is a floor, not an
-      # exact version). Pinning to 5.9 broke this job once ubuntu-latest
-      # moved to a newer Ubuntu than Swift 5.9 has an official build for
-      # (HTTP 404 fetching the toolchain); tracking "latest" avoids that
-      # class of failure recurring as the runner image ages.
+      # Pinned to 6.3.3 (rather than tracking "latest") to work around a
+      # currently-open upstream bug (swift-actions/setup-swift#802): the
+      # bundled swiftly 1.1.0 mis-builds the download URL for any toolchain
+      # version ending in ".0" (drops the trailing zero), so "latest"
+      # started failing the moment Swift 6.4.0 was released. 6.3.3 is the
+      # newest release that doesn't end in ".0" and isn't affected. Safe to
+      # go back to tracking "latest" once #802 (or an equivalent swiftly
+      # bump) merges upstream -- see that same class of failure's other
+      # side documented in the 5.9-pin note this replaced: don't pin to a
+      # version so old that a future Ubuntu image drops official support
+      # for it either.
       #
-      # skip-verify-signature works around a currently-open upstream bug
-      # (swift-actions/setup-swift#798) where GPG verification of the
-      # downloaded toolchain fails with "No public key" for every version,
-      # unrelated to this project. The toolchain is still fetched over
-      # HTTPS from swift.org; this only skips the extra GPG check on top
-      # of that. Safe to drop once #798 is fixed upstream.
+      # skip-verify-signature works around a separate, also still-open
+      # upstream bug (swift-actions/setup-swift#798) where GPG verification
+      # of the downloaded toolchain fails with "No public key" for every
+      # version, unrelated to this project. The toolchain is still fetched
+      # over HTTPS from swift.org; this only skips the extra GPG check on
+      # top of that. Safe to drop once #798 is fixed upstream.
       - name: Set up Swift toolchain
         uses: swift-actions/setup-swift@v3
         with:
+          swift-version: "6.3.3"
           skip-verify-signature: true
 
       - name: Build project
