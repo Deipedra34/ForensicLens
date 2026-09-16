@@ -66,23 +66,20 @@ jobs:
       #
       # setup-swift installs the toolchain through swiftly. `swift` itself
       # stays on PATH for the rest of the job, but empirically (confirmed by
-      # tracing a failed run) neither the `swiftly` command nor a directory
-      # containing bare `llvm-profdata`/`llvm-cov` reliably does -- so this
-      # doesn't trust PATH, or even `swiftly`, for any of it. It searches
-      # the filesystem directly for the real toolchain binaries instead.
-      # setup-swift points swiftly at its own isolated home directory
-      # (rather than the real $HOME) via the SWIFTLY_HOME_DIR environment
-      # variable it exports -- unlike PATH, exported environment variables
-      # do reliably persist to later steps, so that's an exact, guaranteed-
-      # correct place to start looking, with $HOME and setup-swift's own
-      # /opt/hostedtoolcache as fallbacks in case that variable is ever
-      # unset.
+      # tracing a failed run) neither the `swiftly` command, a directory
+      # containing bare `llvm-profdata`/`llvm-cov`, nor the SWIFTLY_HOME_DIR
+      # environment variable setup-swift is supposed to export reliably
+      # survive into this step -- so this doesn't trust PATH, `swiftly`, or
+      # any single guessed directory for any of it. It searches the entire
+      # filesystem for the real binary instead, which costs a few seconds
+      # but is guaranteed correct regardless of exactly where this
+      # particular runner image or setup-swift version happened to put it.
       - name: Merge raw coverage profiles
         if: runner.os == 'Linux'
         run: |
-          LLVM_PROFDATA="$(find "$SWIFTLY_HOME_DIR" "$HOME" /opt/hostedtoolcache -name llvm-profdata -type f 2>/dev/null | head -1)"
+          LLVM_PROFDATA="$(find / -xdev -name llvm-profdata -type f 2>/dev/null | head -1)"
           if [ -z "$LLVM_PROFDATA" ]; then
-            echo "::error::could not locate llvm-profdata under \$SWIFTLY_HOME_DIR ($SWIFTLY_HOME_DIR), \$HOME, or /opt/hostedtoolcache"
+            echo "::error::could not locate llvm-profdata anywhere on the filesystem"
             exit 1
           fi
           echo "Using $LLVM_PROFDATA"
@@ -101,9 +98,9 @@ jobs:
       - name: Export lcov coverage report
         if: runner.os == 'Linux'
         run: |
-          LLVM_COV="$(find "$SWIFTLY_HOME_DIR" "$HOME" /opt/hostedtoolcache -name llvm-cov -type f 2>/dev/null | head -1)"
+          LLVM_COV="$(find / -xdev -name llvm-cov -type f 2>/dev/null | head -1)"
           if [ -z "$LLVM_COV" ]; then
-            echo "::error::could not locate llvm-cov under \$SWIFTLY_HOME_DIR ($SWIFTLY_HOME_DIR), \$HOME, or /opt/hostedtoolcache"
+            echo "::error::could not locate llvm-cov anywhere on the filesystem"
             exit 1
           fi
           echo "Using $LLVM_COV"
