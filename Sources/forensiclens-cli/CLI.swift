@@ -37,6 +37,14 @@ enum CLI {
         let jsonOutput = parsed.flags.contains("--json")
         let configPath = parsed.options["--config"] ?? "forensiclens.yaml"
 
+        let tilingOverride: TilingOverride
+        do {
+            tilingOverride = try parseTilingOverride(parsed)
+        } catch {
+            eprint("Error: \(error)")
+            return 1
+        }
+
         do {
             let config = try ConfigLoader.load(contentsOfFile: configPath)
             let rawBytes = try readFile(imagePath)
@@ -55,7 +63,7 @@ enum CLI {
                 return 1
             }
 
-            let report = engine.run(on: image, only: only)
+            let report = engine.run(on: image, only: only, tiling: tilingOverride)
             if jsonOutput {
                 print(try jsonString(for: report))
             } else {
@@ -126,6 +134,14 @@ enum CLI {
             return 1
         }
 
+        let tilingOverride: TilingOverride
+        do {
+            tilingOverride = try parseTilingOverride(parsed)
+        } catch {
+            eprint("Error: \(error)")
+            return 1
+        }
+
         let files: [String]
         do {
             files = try BatchFileScanner(extensions: extensions, recursive: recursive).scanFiles(in: directory)
@@ -139,7 +155,7 @@ enum CLI {
             return 1
         }
 
-        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config))
+        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config), tiling: tilingOverride)
         let results = await BatchRunner.run(files: files, analyzer: analyzer, maxConcurrency: maxConcurrency, onFileComplete: reportBatchProgress)
 
         let report = BatchReport(directory: directory, results: results)
@@ -189,7 +205,27 @@ enum CLI {
     }
 
     /// Flags this CLI recognizes that take no following value.
-    private static let valuelessFlags: Set<String> = ["--json", "--no-recursive"]
+    private static let valuelessFlags: Set<String> = ["--json", "--no-recursive", "--no-tiling"]
+
+    /// Builds a `TilingOverride` from `--tile-size <n>` / `--no-tiling`,
+    /// shared by both the single-image commands and `batch` since tiling
+    /// is transparent to both -- see `TilingOverride`'s doc comment for
+    /// what each flag does. Not `private`, so `ForensicLensTests` can
+    /// exercise this flag-parsing directly via `@testable import`.
+    static func parseTilingOverride(_ parsed: ParsedArguments) throws -> TilingOverride {
+        let disableTiling = parsed.flags.contains("--no-tiling")
+
+        guard let rawTileSize = parsed.options["--tile-size"] else {
+            return TilingOverride(disableTiling: disableTiling)
+        }
+        guard !disableTiling else {
+            throw CLIError.conflictingTilingFlags
+        }
+        guard let tileSize = Int(rawTileSize), tileSize > 0 else {
+            throw CLIError.invalidTileSize(rawTileSize)
+        }
+        return TilingOverride(forcedTileSize: tileSize)
+    }
 
     struct ParsedArguments {
         let positionals: [String]
@@ -259,6 +295,12 @@ enum CLI {
           --config <path>  Path to a forensiclens.yaml config file.
                             Defaults to ./forensiclens.yaml; missing files
                             fall back to built-in defaults.
+          --tile-size <n>  Force this tile size and enable tiling, even
+                            below forensiclens.yaml's tilingThreshold.
+                            Useful for comparing tiled vs. non-tiled output
+                            on the same image. Cannot combine with --no-tiling.
+          --no-tiling      Force single-block processing, even above
+                            tilingThreshold. Cannot combine with --tile-size.
 
         OPTIONS (batch):
           --no-recursive        Only scan the top-level directory, skip subdirectories.
@@ -269,11 +311,15 @@ enum CLI {
           --format <fmt>        Report format: text (default), json, or csv.
           --output <path>       Write the report to a file instead of stdout.
           --config <path>       Same as above.
+          --tile-size <n>       Same as above, applied to every file in the batch.
+          --no-tiling           Same as above, applied to every file in the batch.
 
         EXAMPLES:
           forensiclens-cli report photo.bmp
           forensiclens-cli ela photo.bmp --json
           forensiclens-cli clone photo.ppm --config custom.yaml
+          forensiclens-cli report large-photo.bmp --tile-size 512
+          forensiclens-cli report large-photo.bmp --no-tiling
           forensiclens-cli batch photos/
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json
@@ -283,11 +329,17 @@ enum CLI {
 
 enum CLIError: Error, CustomStringConvertible {
     case fileNotFound(String)
+    case invalidTileSize(String)
+    case conflictingTilingFlags
 
     var description: String {
         switch self {
         case .fileNotFound(let path):
             return "Could not read file at \"\(path)\"."
+        case .invalidTileSize(let value):
+            return "--tile-size must be a positive integer, got \"\(value)\"."
+        case .conflictingTilingFlags:
+            return "--tile-size and --no-tiling cannot be combined."
         }
     }
 }

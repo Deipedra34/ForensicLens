@@ -25,19 +25,29 @@ public struct ForensicLensEngine: Sendable {
     /// Runs every enabled analyzer against `image` and combines the results
     /// into a `ForensicReport`.
     ///
-    /// - Parameter only: If provided, restricts the run to analyzers whose
-    ///   `identifier` is in this set (still subject to `config`'s enabled
-    ///   flags). If `nil`, every config-enabled analyzer runs. This is what
-    ///   powers the CLI's "run a single analyzer" subcommands.
-    public func run(on image: ImageData, only: Set<String>? = nil) -> ForensicReport {
+    /// - Parameters:
+    ///   - only: If provided, restricts the run to analyzers whose
+    ///     `identifier` is in this set (still subject to `config`'s enabled
+    ///     flags). If `nil`, every config-enabled analyzer runs. This is
+    ///     what powers the CLI's "run a single analyzer" subcommands.
+    ///   - tiling: A CLI-level override of the ordinary, threshold-driven
+    ///     tiling decision (`--tile-size` / `--no-tiling`). Defaults to
+    ///     `.none`, which leaves `config.tiling` in full control.
+    ///
+    /// Whether this image ends up tiled or not, both single-image and
+    /// batch callers go through this one method -- tiling is an internal
+    /// detail of how a large image gets analyzed, not a separate code path
+    /// either has to know about.
+    public func run(on image: ImageData, only: Set<String>? = nil, tiling: TilingOverride = .none) -> ForensicReport {
         var findings: [AnalyzerFinding] = []
+        let tiles = TilingCoordinator.plan(for: image, config: config, override: tiling)
 
         for analyzer in analyzers {
             guard isEnabled(analyzer) else { continue }
             if let only, !only.contains(analyzer.identifier) { continue }
 
             do {
-                findings.append(try analyzer.analyze(image, config: config))
+                findings.append(try TilingCoordinator.run(analyzer, image: image, tiles: tiles, config: config))
             } catch {
                 findings.append(AnalyzerFinding(
                     analyzerID: analyzer.identifier,

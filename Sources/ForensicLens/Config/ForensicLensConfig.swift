@@ -162,16 +162,80 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         }
     }
 
+    /// Settings for the tiling layer (see `Sources/ForensicLens/Tiling`)
+    /// that splits a large image into overlapping tiles before handing it
+    /// to the analyzers above, rather than processing the whole decoded
+    /// pixel buffer as one block.
+    public struct TilingConfig: Codable, Equatable, Sendable {
+        /// Master switch for tiling. When `false`, every image is always
+        /// processed as a single block regardless of `tilingThreshold` --
+        /// equivalent to always passing `--no-tiling` on the CLI.
+        public var enabled: Bool
+
+        /// An image is only tiled once its larger dimension (`max(width,
+        /// height)`) exceeds this many pixels. Images at or below the
+        /// threshold are processed exactly as they were before tiling
+        /// existed -- as a single block -- so this feature changes nothing
+        /// for the vast majority of ordinary-sized inputs.
+        public var tilingThreshold: Int
+
+        /// Side length, in pixels, of each tile's exclusive "core" region
+        /// before overlap is added. Rounded to the nearest multiple of 8
+        /// (minimum 8) when a `TilePlan` is built, for the same 8x8 JPEG
+        /// block-alignment reason documented on `tileOverlap`.
+        public var tileSize: Int
+
+        /// How many pixels of extra surrounding context (a "halo") are
+        /// read on every side of a tile's core region before an analyzer
+        /// runs against it.
+        ///
+        /// This must be a multiple of 8 pixels. `ELAAnalyzer` and
+        /// `DoubleCompressionAnalyzer` both work in JPEG's native 8x8 DCT
+        /// block grid, and that grid is anchored to whatever buffer they're
+        /// given -- always starting at local `(0, 0)`. A tile's core origin
+        /// is always placed on a multiple of `tileSize` (itself rounded to
+        /// a multiple of 8), so as long as the halo subtracted from it is
+        /// *also* a multiple of 8, the tile's extraction origin
+        /// (`core origin - halo`) stays on a multiple of 8 too -- keeping
+        /// the tile-local 8x8 grid perfectly in phase with the grid a
+        /// single-block pass over the whole image would have used. Get
+        /// this wrong (an overlap not divisible by 8) and a tile's DCT
+        /// blocks land out of phase with their neighbors, producing a
+        /// visible seam of spurious recompression error right at the tile
+        /// boundary that has nothing to do with the image content.
+        public var tileOverlap: Int
+
+        public init(enabled: Bool, tilingThreshold: Int, tileSize: Int, tileOverlap: Int) {
+            self.enabled = enabled
+            self.tilingThreshold = tilingThreshold
+            self.tileSize = tileSize
+            self.tileOverlap = tileOverlap
+        }
+
+        /// Standalone defaults for `TilingConfig` on its own (rather than
+        /// reaching through `ForensicLensConfig.default`, which is defined
+        /// in terms of this type and would recurse). `tileOverlap` (64) is
+        /// a multiple of 8 per this type's own doc comment.
+        public static let `default` = TilingConfig(
+            enabled: true,
+            tilingThreshold: 4096,
+            tileSize: 1024,
+            tileOverlap: 64
+        )
+    }
+
     public var ela: ELAConfig
     public var metadata: MetadataConfig
     public var cloneDetection: CloneDetectionConfig
     public var doubleCompression: DoubleCompressionConfig
+    public var tiling: TilingConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
         self.doubleCompression = doubleCompression
+        self.tiling = tiling
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -207,6 +271,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
             acCoefficientRow: 1,
             acCoefficientColumn: 1,
             periodicityThreshold: 0.24
-        )
+        ),
+        tiling: TilingConfig.default
     )
 }

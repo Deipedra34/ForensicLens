@@ -159,4 +159,56 @@ final class ConfigTests: XCTestCase {
 
         XCTAssertEqual(config.ela.elaQualityLevels, [65])
     }
+
+    // MARK: - Tiling
+
+    func testParsingTilingSectionOverridesDefaultsOnlyForMentionedKeys() throws {
+        let yaml = """
+        tiling:
+          tileSize: 512
+        """
+        let config = try ConfigLoader.parse(yaml)
+
+        XCTAssertEqual(config.tiling.tileSize, 512)
+        XCTAssertEqual(config.tiling.enabled, ForensicLensConfig.default.tiling.enabled)
+        XCTAssertEqual(config.tiling.tilingThreshold, ForensicLensConfig.default.tiling.tilingThreshold)
+        XCTAssertEqual(config.tiling.tileOverlap, ForensicLensConfig.default.tiling.tileOverlap)
+    }
+
+    func testParsingFullTilingSection() throws {
+        let yaml = """
+        tiling:
+          enabled: false
+          tilingThreshold: 2048
+          tileSize: 256
+          tileOverlap: 32
+        """
+        let config = try ConfigLoader.parse(yaml)
+
+        XCTAssertEqual(config.tiling.enabled, false)
+        XCTAssertEqual(config.tiling.tilingThreshold, 2048)
+        XCTAssertEqual(config.tiling.tileSize, 256)
+        XCTAssertEqual(config.tiling.tileOverlap, 32)
+    }
+
+    func testTilingUnknownKeyThrows() {
+        let yaml = """
+        tiling:
+          notARealKey: 1
+        """
+        XCTAssertThrowsError(try ConfigLoader.parse(yaml)) { error in
+            guard case ConfigError.unknownKey(let section, let key) = error else {
+                return XCTFail("Expected ConfigError.unknownKey, got \(error)")
+            }
+            XCTAssertEqual(section, "tiling")
+            XCTAssertEqual(key, "notARealKey")
+        }
+    }
+
+    /// The default `tileOverlap` must be a multiple of 8, per this
+    /// feature's requirement -- both ELA and double-compression detection
+    /// depend on 8x8 JPEG block alignment surviving tile boundaries.
+    func testDefaultTileOverlapIsAMultipleOfEight() {
+        XCTAssertEqual(ForensicLensConfig.default.tiling.tileOverlap % 8, 0)
+    }
 }

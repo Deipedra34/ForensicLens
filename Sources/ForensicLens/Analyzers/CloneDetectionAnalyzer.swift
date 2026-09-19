@@ -71,12 +71,27 @@ public struct CloneDetectionAnalyzer: Analyzer {
         }
 
         let matches = Self.findMatches(candidates, similarityThreshold: settings.similarityThreshold, minimumDistance: settings.minimumBlockDistance)
-        guard matches.count >= Self.minimumReportablePairs else {
-            return AnalyzerFinding.clean(analyzerID: identifier, summary: "No duplicated regions detected.")
+        return Self.makeFinding(analyzerID: identifier, matches: matches, imageWidth: buffer.width, imageHeight: buffer.height, settings: settings)
+    }
+
+    /// Builds the final `AnalyzerFinding` from a completed set of block
+    /// matches -- the exact same scoring and indicator-building logic
+    /// `analyze` uses for a single, untiled image, factored out so
+    /// `TiledCloneDetection` can reuse it verbatim for `matches` gathered
+    /// globally across every tile (passing the *full* image's dimensions,
+    /// not any one tile's). Keeping one scoring implementation shared by
+    /// both paths is what makes a tiled and an untiled clone detection
+    /// score numerically identical (not just "close") whenever the same
+    /// matches are found, rather than two scoring formulas that could
+    /// quietly drift apart.
+    static func makeFinding(analyzerID: String, matches: [Match], imageWidth: Int, imageHeight: Int, settings: ForensicLensConfig.CloneDetectionConfig) -> AnalyzerFinding {
+        let blockSize = max(4, settings.blockSize)
+        guard matches.count >= minimumReportablePairs else {
+            return AnalyzerFinding.clean(analyzerID: analyzerID, summary: "No duplicated regions detected.")
         }
 
         let uniqueBlocks = Set(matches.flatMap { [$0.a, $0.b] })
-        let imageArea = Double(buffer.width * buffer.height)
+        let imageArea = Double(imageWidth * imageHeight)
         let coverageFraction = imageArea > 0 ? min(1.0, Double(uniqueBlocks.count * blockSize * blockSize) / imageArea) : 0
 
         let areaScore = min(80, (coverageFraction / 0.02) * 80)
@@ -97,29 +112,51 @@ public struct CloneDetectionAnalyzer: Analyzer {
         }
 
         let summary = "\(matches.count) duplicated region pair(s) found, suggesting copy-move editing."
-        return AnalyzerFinding(analyzerID: identifier, score: score, summary: summary, indicators: indicators)
+        return AnalyzerFinding(analyzerID: analyzerID, score: score, summary: summary, indicators: indicators)
     }
 
     // MARK: - Block extraction
 
-    private struct BlockPosition: Hashable {
+    /// A block's top-left corner, in the coordinate space it was scanned
+    /// in. Not `private`: `TiledCloneDetection` scans each tile in that
+    /// tile's own local coordinates and then translates every
+    /// `BlockPosition` it keeps into image-global coordinates itself (see
+    /// that type's doc comment), so this type crosses that module
+    /// boundary too.
+    struct BlockPosition: Hashable, Sendable {
         let x: Int
         let y: Int
     }
 
-    private struct Candidate {
+    /// A candidate block and its comparison fingerprint. Not `private` for
+    /// the same reason as `BlockPosition`: `TiledCloneDetection` builds one
+    /// global list of these, pooled across every tile, before calling
+    /// `findMatches` a single time over the whole image -- see that type's
+    /// doc comment for why the pooling has to happen before matching, not
+    /// after.
+    struct Candidate: Sendable {
         let position: BlockPosition
         let feature: [Double]
     }
 
-    private struct Match {
+    /// A pair of candidate blocks whose feature vectors were close enough,
+    /// and whose positions were far enough apart, to report as a possible
+    /// copy-move. Not `private`, for the same cross-module reason as
+    /// `BlockPosition`/`Candidate`.
+    struct Match: Sendable {
         let a: BlockPosition
         let b: BlockPosition
         let distance: Double
         let spatialDistance: Int
     }
 
-    private static func candidateBlocks(_ buffer: PixelBuffer, blockSize: Int, stride: Int, minimumVariance: Double) -> [Candidate] {
+    /// Scans `buffer` for non-flat comparison blocks and returns their
+    /// fingerprints. `buffer`'s own coordinate space is whatever the
+    /// caller gave it -- global image coordinates for a single, untiled
+    /// pass, or a tile-local space that `TiledCloneDetection` translates
+    /// back to global coordinates itself. Not `private`, so the tiling
+    /// layer can reuse this exact scanning logic per tile.
+    static func candidateBlocks(_ buffer: PixelBuffer, blockSize: Int, stride: Int, minimumVariance: Double) -> [Candidate] {
         var candidates: [Candidate] = []
         var by = 0
         while by + blockSize <= buffer.height {
@@ -175,7 +212,14 @@ public struct CloneDetectionAnalyzer: Analyzer {
 
     // MARK: - Matching
 
-    private static func findMatches(_ candidates: [Candidate], similarityThreshold: Double, minimumDistance: Int) -> [Match] {
+    /// Compares every candidate against every other candidate -- an O(n^2)
+    /// pass over `candidates`. Not `private`: `TiledCloneDetection` calls
+    /// this exactly once, over one global list of candidates pooled across
+    /// every tile, rather than once per tile, which is what lets a clone
+    /// whose source and copy landed in two different (possibly distant)
+    /// tiles still be compared against each other and found. See that
+    /// type's doc comment for the full reasoning.
+    static func findMatches(_ candidates: [Candidate], similarityThreshold: Double, minimumDistance: Int) -> [Match] {
         var matches: [Match] = []
         for i in 0..<candidates.count {
             for j in (i + 1)..<candidates.count {

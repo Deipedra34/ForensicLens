@@ -111,6 +111,8 @@ public enum ConfigLoader {
             try applyCloneDetection(key: key, value: value, to: &config.cloneDetection)
         case "doubleCompression":
             try applyDoubleCompression(key: key, value: value, to: &config.doubleCompression)
+        case "tiling":
+            try applyTiling(key: key, value: value, to: &config.tiling)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -187,6 +189,21 @@ public enum ConfigLoader {
             doubleCompression.periodicityThreshold = try parseDouble(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "doubleCompression", key: key)
+        }
+    }
+
+    private static func applyTiling(key: String, value: String, to tiling: inout ForensicLensConfig.TilingConfig) throws {
+        switch key {
+        case "enabled":
+            tiling.enabled = try parseBool(key: key, value: value)
+        case "tilingThreshold":
+            tiling.tilingThreshold = try parseInt(key: key, value: value)
+        case "tileSize":
+            tiling.tileSize = try parseInt(key: key, value: value)
+        case "tileOverlap":
+            tiling.tileOverlap = try parseInt(key: key, value: value)
+        default:
+            throw ConfigError.unknownKey(section: "tiling", key: key)
         }
     }
 

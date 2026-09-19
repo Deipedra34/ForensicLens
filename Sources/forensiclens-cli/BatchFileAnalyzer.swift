@@ -25,13 +25,19 @@ struct BatchAnalysisResult: Sendable {
 struct BatchFileAnalyzer: Sendable {
     let engine: ForensicLensEngine
 
+    /// The same `--tile-size` / `--no-tiling` debug override the
+    /// single-image commands accept, applied to every file in the batch --
+    /// tiling is transparent to `batch` exactly as it is to `report`/`ela`/
+    /// etc., with no separate code path for it.
+    var tiling: TilingOverride = .none
+
     func analyze(filePath: String) -> BatchAnalysisResult {
         guard let data = FileManager.default.contents(atPath: filePath) else {
             return BatchAnalysisResult(filePath: filePath, outcome: .skipped(reason: "could not read file"))
         }
         do {
             let image = try ImageData.load([UInt8](data))
-            let report = engine.run(on: image)
+            let report = engine.run(on: image, tiling: tiling)
             return BatchAnalysisResult(filePath: filePath, outcome: .analyzed(report))
         } catch {
             return BatchAnalysisResult(filePath: filePath, outcome: .skipped(reason: "\(error)"))

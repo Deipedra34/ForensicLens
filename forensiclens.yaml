@@ -113,3 +113,28 @@ doubleCompression:
   # periodic double-compression "comb" rather than an ordinary single-
   # compression histogram's smooth shape. Higher is stricter.
   periodicityThreshold: 0.24
+
+tiling:
+  # Master switch for tiled processing of large images. When false, every
+  # image is always analyzed as a single block, regardless of
+  # tilingThreshold (same as always passing --no-tiling on the CLI).
+  enabled: true
+
+  # Once an image's larger dimension (max(width, height)) exceeds this many
+  # pixels, it's split into overlapping tiles and analyzed tile-by-tile
+  # instead of as one block, to bound peak memory usage. Images at or below
+  # this size are processed exactly as before tiling existed.
+  tilingThreshold: 4096
+
+  # Side length, in pixels, of each tile's exclusive "core" region before
+  # overlap is added. Rounded to the nearest multiple of 8 (minimum 8).
+  tileSize: 1024
+
+  # Extra surrounding context, in pixels, read on every side of a tile's
+  # core region before an analyzer runs against it. Must be a multiple of
+  # 8 pixels -- ELA and double-compression detection both work in JPEG's
+  # native 8x8 DCT block grid, and a non-8-aligned overlap would shift that
+  # grid out of phase across a tile boundary, producing a visible seam of
+  # spurious recompression error that has nothing to do with the image
+  # itself.
+  tileOverlap: 64
