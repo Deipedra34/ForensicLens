@@ -74,15 +74,31 @@ jobs:
       # one fails with "no profile can be merged" even though a binary by
       # that name genuinely exists. The toolchain's own llvm-profdata/
       # llvm-cov, matching whatever actually produced these .profraw files,
-      # ships right alongside `swift` itself in the same directory -- so
-      # this resolves `swift`'s real location (following any symlink all
-      # the way down, in case PATH only has a proxy for it) and looks next
-      # to that instead of searching by name at all.
+      # ships in the toolchain's own usr/bin, next to the real `swift`
+      # driver.
+      #
+      # Following `swift`'s symlinks (`readlink -f`) used to be enough to
+      # find that directory, but swiftly's `swift` on PATH is a proxy
+      # binary of its own, not a symlink into the toolchain -- resolving it
+      # lands in swiftly's bin dir, which has no llvm-profdata (exit code
+      # 127). So this asks the driver itself instead: `-print-target-info`
+      # runs the *real* toolchain driver even through the proxy and
+      # reports its runtime resource dir (<toolchain>/usr/lib/swift), whose
+      # ../../bin is the toolchain's usr/bin. The resolved dir is exported
+      # once via GITHUB_ENV for both coverage steps below.
+      - name: Locate Swift toolchain LLVM tools
+        if: runner.os == 'Linux'
+        run: |
+          RESOURCE_DIR="$(swift -print-target-info | sed -n 's/.*"runtimeResourcePath": *"\([^"]*\)".*/\1/p' | head -n 1)"
+          TOOLCHAIN_BIN="$(cd "$RESOURCE_DIR/../../bin" && pwd)"
+          echo "Resolved toolchain bin dir: $TOOLCHAIN_BIN"
+          test -x "$TOOLCHAIN_BIN/llvm-profdata" || { echo "llvm-profdata not found in $TOOLCHAIN_BIN"; exit 1; }
+          test -x "$TOOLCHAIN_BIN/llvm-cov" || { echo "llvm-cov not found in $TOOLCHAIN_BIN"; exit 1; }
+          echo "TOOLCHAIN_BIN=$TOOLCHAIN_BIN" >> "$GITHUB_ENV"
+
       - name: Merge raw coverage profiles
         if: runner.os == 'Linux'
         run: |
-          TOOLCHAIN_BIN="$(dirname "$(readlink -f "$(command -v swift)")")"
-          echo "Resolved toolchain bin dir: $TOOLCHAIN_BIN"
           "$TOOLCHAIN_BIN/llvm-profdata" merge -sparse \
             .build/debug/codecov/*.profraw \
             -o .build/debug/codecov/default.profdata
@@ -92,13 +108,10 @@ jobs:
       # compiled test bundle so it can map coverage counters back to
       # source lines. The bundle name matches this package's name
       # ("forensiclens" in Package.swift) with "PackageTests.xctest"
-      # appended, which is SwiftPM's standard naming for it on Linux. See
-      # the previous step's comment for why this is resolved relative to
-      # `swift`'s own real location rather than searched for by name.
+      # appended, which is SwiftPM's standard naming for it on Linux.
       - name: Export lcov coverage report
         if: runner.os == 'Linux'
         run: |
-          TOOLCHAIN_BIN="$(dirname "$(readlink -f "$(command -v swift)")")"
           "$TOOLCHAIN_BIN/llvm-cov" export -format="lcov" \
             .build/debug/forensiclensPackageTests.xctest \
             -instr-profile .build/debug/codecov/default.profdata \

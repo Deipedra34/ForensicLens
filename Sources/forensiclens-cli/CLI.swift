@@ -1,5 +1,6 @@
 import Foundation
 import ForensicLens
+import HTMLReporting
 import ImageDecoding
 
 /// Command-line front end for the ForensicLens library.
@@ -38,8 +39,10 @@ enum CLI {
         let configPath = parsed.options["--config"] ?? "forensiclens.yaml"
 
         let tilingOverride: TilingOverride
+        let htmlReportPath: String?
         do {
             tilingOverride = try parseTilingOverride(parsed)
+            htmlReportPath = try pathOption("--html-report", in: parsed)
         } catch {
             eprint("Error: \(error)")
             return 1
@@ -68,6 +71,13 @@ enum CLI {
                 print(try jsonString(for: report))
             } else {
                 print(report.textReport)
+            }
+
+            if let htmlReportPath {
+                let html = HTMLReportGenerator().render(report: report, image: image, sourcePath: imagePath)
+                try writeFile(html, to: htmlReportPath)
+                // stderr, so `--json` output on stdout stays pipeable.
+                eprint("HTML report written to \(htmlReportPath)")
             }
             return 0
         } catch {
@@ -135,8 +145,12 @@ enum CLI {
         }
 
         let tilingOverride: TilingOverride
+        let htmlReportDirectory: String?
+        let htmlReportThreshold: Double
         do {
             tilingOverride = try parseTilingOverride(parsed)
+            htmlReportDirectory = try pathOption("--html-report-dir", in: parsed)
+            htmlReportThreshold = try parseHTMLReportThreshold(parsed, reportDirectory: htmlReportDirectory)
         } catch {
             eprint("Error: \(error)")
             return 1
@@ -155,8 +169,29 @@ enum CLI {
             return 1
         }
 
-        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config), tiling: tilingOverride)
+        var htmlReports: BatchHTMLReportOptions?
+        if let htmlReportDirectory {
+            do {
+                try FileManager.default.createDirectory(atPath: htmlReportDirectory, withIntermediateDirectories: true)
+            } catch {
+                eprint("Error: could not create HTML report directory \"\(htmlReportDirectory)\": \(error)")
+                return 1
+            }
+            htmlReports = BatchHTMLReportOptions(directory: htmlReportDirectory, threshold: htmlReportThreshold, sourceRoot: directory, files: files)
+        }
+
+        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config), tiling: tilingOverride, htmlReports: htmlReports)
         let results = await BatchRunner.run(files: files, analyzer: analyzer, maxConcurrency: maxConcurrency, onFileComplete: reportBatchProgress)
+
+        if let htmlReports {
+            do {
+                let indexPath = try htmlReports.writeIndex(for: results, scannedDirectory: directory)
+                eprint("HTML reports index written to \(indexPath)")
+            } catch {
+                eprint("Error: could not write HTML report index: \(error)")
+                return 1
+            }
+        }
 
         let report = BatchReport(directory: directory, results: results)
         let rendered: String
@@ -192,6 +227,9 @@ enum CLI {
         if case .skipped(let reason) = result.outcome {
             eprint("warning: skipping \(result.filePath): \(reason)")
         }
+        if case .failed(let reason)? = result.htmlReport {
+            eprint("warning: no HTML report for \(result.filePath): \(reason)")
+        }
         let progressLine = "\r\(completed)/\(total) processed" + (completed == total ? "\n" : "")
         guard let data = progressLine.data(using: .utf8) else { return }
         FileHandle.standardError.write(data)
@@ -225,6 +263,42 @@ enum CLI {
             throw CLIError.invalidTileSize(rawTileSize)
         }
         return TilingOverride(forcedTileSize: tileSize)
+    }
+
+    /// Returns the value of a path-valued option such as `--html-report`,
+    /// or `nil` if it wasn't given. An option passed as the very last
+    /// argument with no value lands in `parsed.flags` (see
+    /// `parseArguments`); that's reported as an error rather than silently
+    /// producing no report.
+    static func pathOption(_ name: String, in parsed: ParsedArguments) throws -> String? {
+        if let value = parsed.options[name] {
+            guard !value.isEmpty else { throw CLIError.missingOptionValue(name) }
+            return value
+        }
+        if parsed.flags.contains(name) {
+            throw CLIError.missingOptionValue(name)
+        }
+        return nil
+    }
+
+    /// Parses `--html-report-threshold <score>` (default 0, i.e. any
+    /// non-zero score gets a report). Only meaningful alongside
+    /// `--html-report-dir`, so giving it alone is an error rather than a
+    /// silently ignored flag.
+    static func parseHTMLReportThreshold(_ parsed: ParsedArguments, reportDirectory: String?) throws -> Double {
+        guard let raw = parsed.options["--html-report-threshold"] else {
+            if parsed.flags.contains("--html-report-threshold") {
+                throw CLIError.missingOptionValue("--html-report-threshold")
+            }
+            return 0
+        }
+        guard reportDirectory != nil else {
+            throw CLIError.thresholdWithoutReportDirectory
+        }
+        guard let value = Double(raw), value.isFinite, value >= 0, value <= 100 else {
+            throw CLIError.invalidHTMLReportThreshold(raw)
+        }
+        return value
     }
 
     struct ParsedArguments {
@@ -266,6 +340,14 @@ enum CLI {
         return [UInt8](data)
     }
 
+    private static func writeFile(_ contents: String, to path: String) throws {
+        do {
+            try contents.write(toFile: path, atomically: true, encoding: .utf8)
+        } catch {
+            throw CLIError.cannotWriteFile(path, "\(error)")
+        }
+    }
+
     private static func jsonString(for report: ForensicReport) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -278,7 +360,7 @@ enum CLI {
         ForensicLens -- image manipulation forensics
 
         USAGE:
-          forensiclens-cli <command> <image-path> [--json] [--config <path>]
+          forensiclens-cli <command> <image-path> [--json] [--config <path>] [--html-report <path>]
           forensiclens-cli batch <directory> [options]
 
         COMMANDS:
@@ -292,6 +374,11 @@ enum CLI {
 
         OPTIONS (report / ela / metadata / clone / doublecompression):
           --json           Print the report as JSON instead of plain text.
+          --html-report <path>
+                           Also write a self-contained HTML report to <path>:
+                            the image with each analyzer's flagged regions
+                            overlaid, per-analyzer layer toggles, and the
+                            full findings breakdown.
           --config <path>  Path to a forensiclens.yaml config file.
                             Defaults to ./forensiclens.yaml; missing files
                             fall back to built-in defaults.
@@ -310,6 +397,13 @@ enum CLI {
                                  to the number of available CPU cores.
           --format <fmt>        Report format: text (default), json, or csv.
           --output <path>       Write the report to a file instead of stdout.
+          --html-report-dir <path>
+                                Write one HTML report per image scoring above
+                                 the threshold into <path>, plus an index.html
+                                 linking them all, highest score first.
+          --html-report-threshold <score>
+                                Minimum score (exclusive) for an HTML report.
+                                 Defaults to 0: any non-zero score.
           --config <path>       Same as above.
           --tile-size <n>       Same as above, applied to every file in the batch.
           --no-tiling           Same as above, applied to every file in the batch.
@@ -317,25 +411,39 @@ enum CLI {
         EXAMPLES:
           forensiclens-cli report photo.bmp
           forensiclens-cli ela photo.bmp --json
+          forensiclens-cli report photo.bmp --html-report photo-report.html
           forensiclens-cli clone photo.ppm --config custom.yaml
           forensiclens-cli report large-photo.bmp --tile-size 512
           forensiclens-cli report large-photo.bmp --no-tiling
           forensiclens-cli batch photos/
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json
+          forensiclens-cli batch photos/ --html-report-dir reports/ --html-report-threshold 45
         """)
     }
 }
 
 enum CLIError: Error, CustomStringConvertible {
     case fileNotFound(String)
+    case cannotWriteFile(String, String)
     case invalidTileSize(String)
     case conflictingTilingFlags
+    case missingOptionValue(String)
+    case invalidHTMLReportThreshold(String)
+    case thresholdWithoutReportDirectory
 
     var description: String {
         switch self {
         case .fileNotFound(let path):
             return "Could not read file at \"\(path)\"."
+        case .cannotWriteFile(let path, let reason):
+            return "Could not write file at \"\(path)\": \(reason)"
+        case .missingOptionValue(let name):
+            return "\(name) requires a value."
+        case .invalidHTMLReportThreshold(let value):
+            return "--html-report-threshold must be a number from 0 to 100, got \"\(value)\"."
+        case .thresholdWithoutReportDirectory:
+            return "--html-report-threshold only applies together with --html-report-dir."
         case .invalidTileSize(let value):
             return "--tile-size must be a positive integer, got \"\(value)\"."
         case .conflictingTilingFlags:

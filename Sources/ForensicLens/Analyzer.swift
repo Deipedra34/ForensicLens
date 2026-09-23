@@ -1,5 +1,43 @@
 import ImageDecoding
 
+/// A rectangular area of the analyzed image, in the original image's pixel
+/// coordinates (origin at the top-left corner, `x` to the right, `y` down).
+///
+/// This is how a spatial analyzer says *where* an indicator was observed,
+/// so a report can point at the exact spot instead of leaving a reader to
+/// cross-reference coordinates in a sentence by hand -- the HTML report
+/// draws one overlay box per region, for instance.
+public struct Region: Sendable, Hashable, Codable {
+    public let x: Int
+    public let y: Int
+    public let width: Int
+    public let height: Int
+
+    public init(x: Int, y: Int, width: Int, height: Int) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+
+    /// This region shifted by `(dx, dy)` -- e.g. from a tile's local
+    /// coordinates back into full-image coordinates.
+    public func offsetBy(dx: Int, dy: Int) -> Region {
+        Region(x: x + dx, y: y + dy, width: width, height: height)
+    }
+
+    /// The overlap between this region and `other`, or `nil` if they don't
+    /// overlap at all.
+    public func intersection(_ other: Region) -> Region? {
+        let x0 = max(x, other.x)
+        let y0 = max(y, other.y)
+        let x1 = min(x + width, other.x + other.width)
+        let y1 = min(y + height, other.y + other.height)
+        guard x1 > x0, y1 > y0 else { return nil }
+        return Region(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+}
+
 /// A single piece of evidence an analyzer surfaced while examining an image.
 ///
 /// Indicators are the itemized building blocks of the human-readable report.
@@ -18,9 +56,40 @@ public struct Indicator: Sendable, Equatable, Codable {
     /// 0 (irrelevant) to 100 (essentially conclusive on its own).
     public let weight: Double
 
-    public init(message: String, weight: Double) {
+    /// Where in the image this observation was made, if it's localized.
+    /// Empty for non-spatial evidence (an EXIF tag, say). A clone-detection
+    /// match carries two regions -- the source block and its copy -- and a
+    /// summary indicator can carry every region it summarizes.
+    public let regions: [Region]
+
+    public init(message: String, weight: Double, regions: [Region] = []) {
         self.message = message
         self.weight = weight
+        self.regions = regions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case message, weight, regions
+    }
+
+    // Hand-written so `regions` stays optional on the wire: omitted from
+    // JSON when empty (a non-spatial indicator's JSON reads exactly as it
+    // did before regions existed), and tolerated as missing when decoding
+    // JSON written before this field was added.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        message = try container.decode(String.self, forKey: .message)
+        weight = try container.decode(Double.self, forKey: .weight)
+        regions = try container.decodeIfPresent([Region].self, forKey: .regions) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(message, forKey: .message)
+        try container.encode(weight, forKey: .weight)
+        if !regions.isEmpty {
+            try container.encode(regions, forKey: .regions)
+        }
     }
 }
 

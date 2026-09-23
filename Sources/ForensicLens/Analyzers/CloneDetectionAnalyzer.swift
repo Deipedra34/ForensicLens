@@ -98,16 +98,28 @@ public struct CloneDetectionAnalyzer: Analyzer {
         let countScore = min(20, Double(matches.count))
         let score = areaScore + countScore
 
+        func blockRegion(_ position: BlockPosition) -> Region {
+            Region(x: position.x, y: position.y, width: blockSize, height: blockSize)
+        }
+
+        // Sorted so the summary indicator's region list (and therefore
+        // JSON output) is deterministic rather than following `Set` order.
+        let matchedRegions = uniqueBlocks
+            .sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+            .map(blockRegion)
+
         let percent = String(format: "%.1f", coverageFraction * 100)
         var indicators = [Indicator(
             message: "\(matches.count) matching block pair(s) found, covering approximately \(percent)% of the image area.",
-            weight: areaScore
+            weight: areaScore,
+            regions: matchedRegions
         )]
 
         for match in matches.sorted(by: { $0.distance < $1.distance }).prefix(5) {
             indicators.append(Indicator(
                 message: "Block at (\(match.a.x),\(match.a.y)) closely matches block at (\(match.b.x),\(match.b.y)) (feature distance \(String(format: "%.2f", match.distance)), \(match.spatialDistance) px apart).",
-                weight: min(20, max(0, settings.similarityThreshold - match.distance) * 4)
+                weight: min(20, max(0, settings.similarityThreshold - match.distance) * 4),
+                regions: [blockRegion(match.a), blockRegion(match.b)]
             ))
         }
 

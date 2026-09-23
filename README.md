@@ -57,6 +57,10 @@ flowchart TB
         Report[ForensicReport]
     end
 
+    subgraph HTMLReporting["HTMLReporting"]
+        HTML[HTMLReportGenerator]
+    end
+
     File --> Decode
     Decode --> PixelBuffer
     File --> ImageData
@@ -78,6 +82,8 @@ flowchart TB
     Clone --> Scorer
     DoubleComp --> Scorer
     Scorer --> Report
+    Report --> HTML
+    ImageData --> HTML
 ```
 
 The rule that keeps this modular: **`CStbImage` is the only place C code lives, and `ImageDecoding` is the only module allowed to import it.** Everything above `ImageDecoding` (every analyzer, the scorer, the CLI) works exclusively with the plain-Swift `PixelBuffer` / `ImageData` types and never sees a C pointer. Swapping in a real JPEG decoder later, or adding PNG support, means touching `ImageDecoding` and nothing else.
@@ -99,11 +105,26 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 |---|---|
 | Library + CLI in one package | Yes |
 | Plain-text, JSON, and CSV report output | Yes |
+| Self-contained HTML visual report with region overlays | Yes |
 | Per-analyzer enable/disable via config | Yes |
 | Tiled processing of large images (bounded memory, cross-tile clone detection) | Yes |
 | Concurrent batch scanning of a directory of images | Yes |
 | Cross-platform (macOS / Linux) | Yes |
 | Third-party dependencies | None |
+
+### HTML visual report
+
+Text and JSON reports say *what* was flagged; the HTML report shows *where*. `--html-report` writes a single `.html` file that opens in any browser, with nothing else to ship alongside it:
+
+- **Suspicion score** and verdict at the top, color-coded by severity.
+- **The analyzed image**, embedded directly in the page as a base64 `data:` URI (BMP and JPEG are embedded byte-for-byte; PPM/PGM, which browsers can't display, are converted to BMP from the already-decoded pixels).
+- **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- and purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from.
+- **A checkbox per analyzer** above the image to show or hide that layer (a few lines of inline JavaScript, no libraries), plus a legend mapping each color to its analyzer.
+- **The full findings breakdown** below the image: analyzer name, score, summary, and every indicator with its region coordinates -- the same information as the text/JSON report.
+
+An image with nothing flagged still gets a valid report that says "No anomalies detected." Overlay coordinates are in the original image's pixel space (the same `regions` now included on each `Indicator` in JSON output), so boxes stay aligned at any zoom level.
+
+<!-- Screenshot placeholder: add docs/images/html-report.png showing a report with ELA and clone overlays, then reference it here. -->
 
 ## Installation
 
@@ -131,7 +152,7 @@ swift build -c release
 ## CLI usage
 
 ```
-forensiclens-cli <command> <image-path> [--json] [--config <path>]
+forensiclens-cli <command> <image-path> [--json] [--config <path>] [--html-report <path>]
 forensiclens-cli batch <directory> [options]
 
 COMMANDS:
@@ -145,6 +166,11 @@ COMMANDS:
 
 OPTIONS (report / ela / metadata / clone / doublecompression):
   --json           Print the report as JSON instead of plain text.
+  --html-report <path>
+                   Also write a self-contained HTML report to <path>:
+                    the image with each analyzer's flagged regions
+                    overlaid, per-analyzer layer toggles, and the
+                    full findings breakdown.
   --config <path>  Path to a forensiclens.yaml config file.
                     Defaults to ./forensiclens.yaml; a missing file
                     falls back to built-in defaults.
@@ -163,6 +189,13 @@ OPTIONS (batch):
                          to the number of available CPU cores.
   --format <fmt>        Report format: text (default), json, or csv.
   --output <path>       Write the report to a file instead of stdout.
+  --html-report-dir <path>
+                        Write one HTML report per image scoring above
+                         the threshold into <path>, plus an index.html
+                         linking them all, highest score first.
+  --html-report-threshold <score>
+                        Minimum score (exclusive) for an HTML report.
+                         Defaults to 0: any non-zero score.
   --config <path>       Same as above.
   --tile-size <n>       Same as above, applied to every file in the batch.
   --no-tiling           Same as above, applied to every file in the batch.
@@ -189,12 +222,20 @@ forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
 # Export the batch report as JSON instead of printing a table
 forensiclens-cli batch photos/ --format json --output report.json
 
+# Visual HTML report with flagged regions overlaid on the image
+forensiclens-cli report photo.bmp --html-report photo-report.html
+
+# One HTML report per image scoring above 45, plus reports/index.html
+forensiclens-cli batch photos/ --html-report-dir reports/ --html-report-threshold 45
+
 # Compare tiled vs. non-tiled output on the same large image
 forensiclens-cli report large-photo.bmp --tile-size 512
 forensiclens-cli report large-photo.bmp --no-tiling
 ```
 
 `batch` reuses the exact same `ForensicLensEngine` pipeline the single-image commands do -- every image is decoded and run through every enabled analyzer, then combined into a `ForensicReport` -- just fanned out concurrently across a whole directory instead of one file at a time. A file that fails to decode (or throws during analysis) is logged to stderr with its path and the reason, then skipped; it never aborts the rest of the batch. Progress ("42/500 processed") and per-file skip warnings go to stderr, so they never contaminate the report on stdout or in `--output`.
+
+With `--html-report-dir`, each image whose overall score is above `--html-report-threshold` (default 0, so any non-zero score) gets its own HTML report in that directory, written as soon as the image finishes so the batch never holds every image in memory at once. Report names are derived from each image's path relative to the scanned directory (`nested/photo.jpg` becomes `nested_photo.jpg.html`). Once the batch completes, an `index.html` in the same directory lists every generated report sorted by suspicion score, highest first, linking to each.
 
 Sample plain-text output:
 

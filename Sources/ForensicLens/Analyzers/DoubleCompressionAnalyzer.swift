@@ -125,9 +125,22 @@ public struct DoubleCompressionAnalyzer: Analyzer {
         let normalizedExcess = min(1.0, (bestStrength - threshold) / max(0.0001, 1.0 - threshold))
         let score = normalizedExcess * 100
 
+        // Double compression is a whole-image property, not a localized
+        // one: the evidence is the histogram pooled over every sampled
+        // block. So the region reported is the full area that histogram was
+        // sampled from -- every complete 8x8 block on the winning offset's
+        // grid -- rather than any one block.
+        let sampledRegion = Region(
+            x: bestOffset.x,
+            y: bestOffset.y,
+            width: (buffer.width - bestOffset.x) / Self.blockSize * Self.blockSize,
+            height: (buffer.height - bestOffset.y) / Self.blockSize * Self.blockSize
+        )
+
         let indicator = Indicator(
             message: "Histogram of DCT coefficient \(coefficientLabel), sampled on an 8x8 block grid offset by (\(bestOffset.x),\(bestOffset.y)) px, shows a periodic double-peak pattern with periodicity strength \(String(format: "%.2f", bestStrength)) (threshold \(String(format: "%.2f", threshold))) -- periodic DCT coefficient pattern detected; image was likely re-compressed after editing.",
-            weight: score
+            weight: score,
+            regions: [sampledRegion]
         )
 
         let summary = "Periodic DCT coefficient pattern detected at coefficient \(coefficientLabel); this image's pixel data is consistent with having been JPEG-compressed twice."

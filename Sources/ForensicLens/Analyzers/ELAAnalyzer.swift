@@ -96,14 +96,16 @@ public struct ELAAnalyzer: Analyzer {
             let percent = String(format: "%.1f", hotFraction * 100)
             indicators.append(Indicator(
                 message: "\(percent)% of the image falls inside \(hotCells.count) region(s) with cross-quality-consistent recompression error at or above \(String(format: "%.1f", threshold)), scanned at quality levels \(levelsDescription) (expected background level for an untouched image is well below this).",
-                weight: coverageScore
+                weight: coverageScore,
+                regions: hotCells.map(\.region)
             ))
 
             for cell in hotCells.sorted(by: { $0.meanError > $1.meanError }).prefix(5) {
                 let agreement = Int(cell.meanAgreementLevels.rounded())
                 indicators.append(Indicator(
                     message: "Region (\(cell.x),\(cell.y))-(\(cell.x + cell.width),\(cell.y + cell.height)) was flagged at \(agreement) of \(levelCount) quality levels, with a consistency-weighted error level of \(String(format: "%.1f", cell.meanError)), notably higher than the image average of \(String(format: "%.1f", meanError)).",
-                    weight: min(40, cell.meanError / max(threshold, 1) * 10)
+                    weight: min(40, cell.meanError / max(threshold, 1) * 10),
+                    regions: [cell.region]
                 ))
             }
         }
@@ -215,6 +217,10 @@ public struct ELAAnalyzer: Analyzer {
         /// reporting text, not for scoring.
         let meanAgreementLevels: Double
         let pixelCount: Int
+
+        var region: Region {
+            Region(x: x, y: y, width: width, height: height)
+        }
     }
 
     private static func aggregate(_ errorMap: [Double], _ agreementMap: [Int], width: Int, height: Int, cellSize: Int) -> [ErrorCell] {

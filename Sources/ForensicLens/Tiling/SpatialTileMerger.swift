@@ -102,7 +102,8 @@ enum SpatialTileMerger {
             for indicator in finding.indicators.prefix(3) {
                 indicators.append(Indicator(
                     message: "[tile at (\(tile.core.x),\(tile.core.y))] \(indicator.message)",
-                    weight: indicator.weight
+                    weight: indicator.weight,
+                    regions: globalRegions(indicator.regions, in: tile)
                 ))
             }
         }
@@ -110,5 +111,20 @@ enum SpatialTileMerger {
         let summary = "\(hot.count) of \(tileFindings.count) tile(s) flagged; strongest at tile (\(dominant.tile.core.x),\(dominant.tile.core.y)): \(dominant.finding.summary)"
 
         return AnalyzerFinding(analyzerID: analyzerID, score: score, summary: summary, indicators: indicators)
+    }
+
+    /// Translates a tile's `regions` -- reported in that tile's own
+    /// extract-local coordinates, since the analyzer only ever saw the
+    /// tile's pixels -- into full-image coordinates, then clips each one to
+    /// the tile's exclusive `core`. Clipping to the core (the same
+    /// ownership rule `TiledCloneDetection` uses) means an anomaly sitting
+    /// in the halo two neighboring tiles share gets drawn once, by the tile
+    /// that owns those pixels, instead of twice at slightly different
+    /// offsets.
+    private static func globalRegions(_ regions: [Region], in tile: Tile) -> [Region] {
+        let core = Region(x: tile.core.x, y: tile.core.y, width: tile.core.width, height: tile.core.height)
+        return regions.compactMap { region in
+            region.offsetBy(dx: tile.extract.x, dy: tile.extract.y).intersection(core)
+        }
     }
 }

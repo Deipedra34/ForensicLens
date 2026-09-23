@@ -50,10 +50,24 @@ let package = Package(
             path: "Sources/ForensicLens"
         ),
 
+        // MARK: - HTML visual report
+        //
+        // Renders a finished `ForensicReport` as a self-contained HTML page
+        // (embedded image, per-analyzer region overlays, breakdown) plus the
+        // batch `index.html`. Kept as its own target so report rendering
+        // only ever consumes analyzer output and can't reach into how the
+        // analyzers compute it. Pure string/data generation -- no
+        // platform-specific frameworks.
+        .target(
+            name: "HTMLReporting",
+            dependencies: ["ForensicLens", "ImageDecoding"],
+            path: "Sources/HTMLReporting"
+        ),
+
         // MARK: - Command line interface
         .executableTarget(
             name: "forensiclens-cli",
-            dependencies: ["ForensicLens", "ImageDecoding"],
+            dependencies: ["ForensicLens", "ImageDecoding", "HTMLReporting"],
             path: "Sources/forensiclens-cli"
         ),
 
@@ -101,7 +115,7 @@ let package = Package(
         // MARK: - Tests
         .testTarget(
             name: "ForensicLensTests",
-            dependencies: ["ForensicLens", "ImageDecoding", "forensiclens-cli", "forensiclens-readme-updater", "BenchmarkReporting"],
+            dependencies: ["ForensicLens", "ImageDecoding", "HTMLReporting", "forensiclens-cli", "forensiclens-readme-updater", "BenchmarkReporting"],
             path: "Tests/ForensicLensTests"
         )
     ]
