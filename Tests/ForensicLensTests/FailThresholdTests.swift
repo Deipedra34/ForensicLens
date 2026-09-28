@@ -161,11 +161,11 @@ final class FailThresholdTests: XCTestCase {
         ])
     }
 
-    /// The same synthetic copy-move forgery `BatchCommandTests` uses, which
-    /// is known to score above zero.
+    /// The same synthetic copy-move forgery `CloneDetectionAnalyzerTests`
+    /// uses (destination on the 8px block grid), known to score above zero.
     private func writeTamperedImage(in root: URL) throws -> URL {
         let base = try Fixtures.noiseBuffer(width: 128, height: 128, seed: 42)
-        let tampered = try Fixtures.pastingPatch(of: 24, from: (x: 8, y: 8), to: (x: 90, y: 90), into: base)
+        let tampered = try Fixtures.pastingPatch(of: 24, from: (x: 8, y: 8), to: (x: 88, y: 88), into: base)
         let url = root.appendingPathComponent("tampered.jpeg")
         try write(tampered, to: url)
         return url
@@ -183,7 +183,7 @@ final class FailThresholdTests: XCTestCase {
         return report.overallScore
     }
 
-    private func parsed(flags: Set<String> = [], options: [String: String]) -> CLI.ParsedArguments {
+    private func parsed(flags: Set<String> = [], options: [String: String] = [:]) -> CLI.ParsedArguments {
         CLI.ParsedArguments(positionals: [], flags: flags, options: options)
     }
 
