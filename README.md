@@ -109,6 +109,7 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 | Per-analyzer enable/disable via config | Yes |
 | Tiled processing of large images (bounded memory, cross-tile clone detection) | Yes |
 | Concurrent batch scanning of a directory of images | Yes |
+| CI / pre-commit integration (GitHub Action, pre-commit hook, `--fail-threshold`) | Yes |
 | Cross-platform (macOS / Linux) | Yes |
 | Third-party dependencies | None |
 
@@ -153,7 +154,7 @@ swift build -c release
 
 ```
 forensiclens-cli <command> <image-path> [--json] [--config <path>] [--html-report <path>]
-forensiclens-cli batch <directory> [options]
+forensiclens-cli batch <directory|file>... [options]
 
 COMMANDS:
   report              Run every enabled analyzer and print a combined report.
@@ -161,7 +162,7 @@ COMMANDS:
   metadata            Run only EXIF/metadata analysis.
   clone               Run only copy-move (clone) detection.
   doublecompression   Run only double JPEG compression detection.
-  batch               Scan a directory of images and print one summary report.
+  batch               Scan directories and/or image files and print one summary report.
   help                Show usage.
 
 OPTIONS (report / ela / metadata / clone / doublecompression):
@@ -196,6 +197,12 @@ OPTIONS (batch):
   --html-report-threshold <score>
                         Minimum score (exclusive) for an HTML report.
                          Defaults to 0: any non-zero score.
+  --fail-threshold <score>
+                        After printing the report, exit with status 2
+                         if any image scored at or above <score>
+                         (0-100). Off by default. 70, where the
+                         "likely manipulated" verdict starts, is a
+                         sensible value for CI.
   --config <path>       Same as above.
   --tile-size <n>       Same as above, applied to every file in the batch.
   --no-tiling           Same as above, applied to every file in the batch.
@@ -228,12 +235,19 @@ forensiclens-cli report photo.bmp --html-report photo-report.html
 # One HTML report per image scoring above 45, plus reports/index.html
 forensiclens-cli batch photos/ --html-report-dir reports/ --html-report-threshold 45
 
+# Scan specific files and fail (exit 2) if any scores 70 or higher
+forensiclens-cli batch new-1.jpg new-2.jpg --fail-threshold 70
+
 # Compare tiled vs. non-tiled output on the same large image
 forensiclens-cli report large-photo.bmp --tile-size 512
 forensiclens-cli report large-photo.bmp --no-tiling
 ```
 
 `batch` reuses the exact same `ForensicLensEngine` pipeline the single-image commands do -- every image is decoded and run through every enabled analyzer, then combined into a `ForensicReport` -- just fanned out concurrently across a whole directory instead of one file at a time. A file that fails to decode (or throws during analysis) is logged to stderr with its path and the reason, then skipped; it never aborts the rest of the batch. Progress ("42/500 processed") and per-file skip warnings go to stderr, so they never contaminate the report on stdout or in `--output`.
+
+`batch` takes any mix of directories (scanned for matching extensions, recursively unless `--no-recursive`) and individual image files. That's how the GitHub Action and pre-commit hook pass it just the changed or staged images.
+
+With `--fail-threshold <score>`, `batch` prints its report as usual, then lists every image that scored at or above the threshold on stderr and exits with status **2**. If nothing reaches the threshold, it exits 0. Status 1 is kept for errors such as a bad flag or a missing path, so CI can tell "an image was flagged" apart from "the scan broke". Skipped (undecodable) files have no score and never trip it. Without the flag, `batch` exits 0 on success, as before.
 
 With `--html-report-dir`, each image whose overall score is above `--html-report-threshold` (default 0, so any non-zero score) gets its own HTML report in that directory, written as soon as the image finishes so the batch never holds every image in memory at once. Report names are derived from each image's path relative to the scanned directory (`nested/photo.jpg` becomes `nested_photo.jpg.html`). Once the batch completes, an `index.html` in the same directory lists every generated report sorted by suspicion score, highest first, linking to each.
 
@@ -253,6 +267,34 @@ Overall suspicion score: 78/100 (likely manipulated)
 [doublecompression] score 42/100 -- Periodic DCT coefficient pattern detected at coefficient (1,1); this image's pixel data is consistent with having been JPEG-compressed twice.
   - Histogram of DCT coefficient (1,1), sampled on an 8x8 block grid offset by (0,0) px, shows a periodic double-peak pattern with periodicity strength 0.31 (threshold 0.24) -- periodic DCT coefficient pattern detected; image was likely re-compressed after editing.
 ```
+
+### Using it as a CI check or pre-commit hook
+
+ForensicLens ships a composite GitHub Action (`action.yml`) and a pre-commit hook (`.pre-commit-hooks.yaml`). Both run `forensiclens-cli batch --fail-threshold` on only the images a pull request, push, or commit touches. Minimal setup:
+
+```yaml
+# .github/workflows/image-forensics.yml
+on: [pull_request]
+jobs:
+  forensiclens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Deipedra34/ForensicLens@v1.9.0
+        with:
+          fail-threshold: "70"
+          html-report: "true"
+```
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/Deipedra34/ForensicLens
+    rev: v1.9.0
+    hooks:
+      - id: forensiclens
+```
+
+See [INTEGRATION.md](INTEGRATION.md) for every input and output, how changed files are detected, build caching, and the hook's options.
 
 ### Library usage
 
@@ -368,7 +410,7 @@ forensiclens-cli report large-photo.bmp --no-tiling --json
 swift test
 ```
 
-The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity.
+The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`.
 
 To generate the same coverage report as CI locally (Linux/macOS with the Swift toolchain's `llvm-cov`/`llvm-profdata`):
 

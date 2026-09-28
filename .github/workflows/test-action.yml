@@ -1,0 +1,90 @@
+name: Test GitHub Action
+
+# Exercises action.yml itself -- not just the CLI flag underneath it --
+# against the small fixture images in .github/action-test-fixtures:
+#
+#   - a clean image must pass,
+#   - a copy-move forgery must fail the action (and still produce an HTML
+#     report artifact),
+#   - the default changed-files mode must run cleanly.
+on:
+  push:
+    paths:
+      - "action.yml"
+      - "Package.swift"
+      - "Sources/**"
+      - ".github/action-test-fixtures/**"
+      - ".github/workflows/test-action.yml"
+  pull_request:
+    paths:
+      - "action.yml"
+      - "Package.swift"
+      - "Sources/**"
+      - ".github/action-test-fixtures/**"
+      - ".github/workflows/test-action.yml"
+  workflow_dispatch: {}
+
+jobs:
+  test-action:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # `uses: ./` needs this repository checked out first, so the
+      # action's own checkout step is turned off below.
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Scan a clean image (should pass)
+        id: clean
+        uses: ./
+        with:
+          checkout: "false"
+          path: .github/action-test-fixtures/clean
+          extensions: ppm
+
+      - name: Scan a tampered image (should fail)
+        id: tampered
+        continue-on-error: true
+        uses: ./
+        with:
+          checkout: "false"
+          path: .github/action-test-fixtures/tampered/*.ppm
+          extensions: ppm
+          fail-threshold: "1"
+          format: json
+          html-report: "true"
+          artifact-name: forensiclens-test-report-${{ matrix.os }}
+
+      - name: Scan changed files only (default path)
+        id: changed
+        uses: ./
+        with:
+          checkout: "false"
+
+      - name: Check results
+        shell: bash
+        env:
+          CLEAN_EXIT: ${{ steps.clean.outputs.exit-code }}
+          CLEAN_COUNT: ${{ steps.clean.outputs.scanned-count }}
+          TAMPERED_OUTCOME: ${{ steps.tampered.outcome }}
+          TAMPERED_EXIT: ${{ steps.tampered.outputs.exit-code }}
+          REPORT_DIR: ${{ steps.tampered.outputs.report-dir }}
+          CHANGED_EXIT: ${{ steps.changed.outputs.exit-code }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          [ "$CLEAN_COUNT" = "1" ] || fail "clean scan should have received 1 path, got '$CLEAN_COUNT'"
+          [ "$CLEAN_EXIT" = "0" ] || fail "clean image should pass, got exit code '$CLEAN_EXIT'"
+
+          [ "$TAMPERED_OUTCOME" = "failure" ] || fail "tampered image should fail the action, outcome was '$TAMPERED_OUTCOME'"
+          [ "$TAMPERED_EXIT" = "2" ] || fail "tampered image should exit 2 (threshold met), got '$TAMPERED_EXIT'"
+          [ -f "$REPORT_DIR/index.html" ] || fail "expected an HTML report index at $REPORT_DIR/index.html"
+
+          [ "$CHANGED_EXIT" = "0" ] || fail "changed-files scan should pass, got exit code '$CHANGED_EXIT'"
+          echo "All action checks passed."

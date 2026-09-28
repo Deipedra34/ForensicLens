@@ -1,0 +1,4 @@
+# Fixture images for .github/workflows/test-action.yml. Marked binary so
+# line-ending conversion never touches their pixel data.
+* binary
+.gitattributes text

@@ -1,0 +1,335 @@
+name: ForensicLens image scan
+description: >-
+  Scan images in your repository for signs of manipulation (error level
+  analysis, EXIF/metadata checks, copy-move detection, double JPEG
+  compression) and fail the check when any image scores at or above a
+  threshold. By default only images added or changed in the current pull
+  request or push are scanned.
+branding:
+  icon: search
+  color: blue
+
+# How this action works, for anyone reviewing it before adopting it:
+#
+#   1. Checks out your repository (with full history, so it can diff
+#      against the pull request's base or the push's previous commit).
+#   2. Builds this repository's own `forensiclens-cli` from source -- no
+#      prebuilt binaries are downloaded -- and caches the built binary so
+#      later runs skip the Swift toolchain setup and the build entirely.
+#   3. Works out which image files to scan: either the `path` you give it,
+#      or the images the current pull request / push added or modified.
+#   4. Runs `forensiclens-cli batch --fail-threshold <n>` over them: the
+#      exact same command you'd run locally, which prints its report to
+#      the job log.
+#   5. Optionally uploads per-image HTML reports as a workflow artifact.
+#   6. Fails the step if any image met the threshold (or the scan errored).
+#
+# Supports Linux and macOS runners. Nothing is sent anywhere: the scan
+# runs entirely on the runner.
+
+inputs:
+  path:
+    description: >-
+      Files, directories, or glob patterns to scan, one per line. Leave
+      empty (the default) to scan only the image files added or modified
+      in the current pull request or push.
+    required: false
+    default: ""
+  fail-threshold:
+    description: >-
+      Fail the step if any image's suspicion score (0-100) is at or above
+      this. The default, 70, is where the CLI's "likely manipulated"
+      verdict starts. Set to an empty string to only report, never fail.
+    required: false
+    default: "70"
+  format:
+    description: Report format printed to the job log. One of table, json, or csv.
+    required: false
+    default: table
+  html-report:
+    description: >-
+      Set to true to also write an HTML report for every image scoring
+      above zero (plus an index.html) and upload them as a workflow
+      artifact.
+    required: false
+    default: "false"
+  extensions:
+    description: Comma-separated image file extensions to scan.
+    required: false
+    default: jpg,jpeg,png
+  config:
+    description: >-
+      Path to a forensiclens.yaml config file in your repository. When
+      empty, ./forensiclens.yaml is used if it exists, otherwise the
+      built-in defaults.
+    required: false
+    default: ""
+  checkout:
+    description: >-
+      Set to false if your workflow already checked out the repository
+      (with fetch-depth: 0 if you rely on the default changed-files mode).
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name of the uploaded HTML report artifact.
+    required: false
+    default: forensiclens-report
+  swift-version:
+    description: Swift toolchain version used to build forensiclens-cli on Linux runners.
+    required: false
+    default: "6.3.3"
+
+outputs:
+  exit-code:
+    description: >-
+      forensiclens-cli's exit status: 0 = all images below the threshold
+      (or nothing to scan), 2 = at least one image met the threshold,
+      1 = the scan itself failed.
+    value: ${{ steps.scan.outputs.exit-code || '0' }}
+  scanned-count:
+    description: Number of files and directories passed to the scan.
+    value: ${{ steps.files.outputs.count }}
+  report-dir:
+    description: Directory the HTML reports were written to, when html-report is true.
+    value: ${{ steps.scan.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check runner OS is supported
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo "::error::The ForensicLens action supports Linux and macOS runners only."
+        exit 1
+
+    # Full history (fetch-depth: 0) so the changed-files step below can
+    # diff against the pull request's base commit or the push's previous
+    # commit, whichever applies.
+    - name: Check out the repository being scanned
+      if: inputs.checkout == 'true'
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    # The cache key covers everything that affects the built binary: the
+    # runner OS/architecture, the Swift version, and a hash of this
+    # action's own Package.swift / Package.resolved / Sources. hashFiles()
+    # can't be used here because it only sees the calling repository's
+    # workspace, not the action's own checkout.
+    - name: Compute forensiclens-cli build cache key
+      id: build-key
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        inputs_list() {
+          echo Package.swift
+          if [ -f Package.resolved ]; then echo Package.resolved; fi
+          find Sources -type f
+        }
+        hash="$(inputs_list | LC_ALL=C sort \
+          | while IFS= read -r file; do shasum -a 256 "$file"; done \
+          | shasum -a 256 | cut -c1-32)"
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+        echo "bin-dir=$HOME/.cache/forensiclens-cli/bin" >> "$GITHUB_OUTPUT"
+
+    - name: Restore cached forensiclens-cli build
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.build-key.outputs.bin-dir }}
+        key: forensiclens-cli-${{ runner.os }}-${{ runner.arch }}-swift${{ inputs.swift-version }}-${{ steps.build-key.outputs.hash }}
+
+    # Only needed on a cache miss, and only on Linux: macOS runners ship
+    # Xcode's Swift toolchain. Same pinned version and flags as this
+    # project's own CI (see .github/workflows/tests.yml for why).
+    - name: Set up Swift toolchain (Linux, cache miss only)
+      if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+      uses: swift-actions/setup-swift@v3
+      with:
+        swift-version: ${{ inputs.swift-version }}
+        skip-verify-signature: true
+
+    # On Linux the Swift runtime and Foundation are linked in statically,
+    # so a cached binary runs on later jobs without installing a toolchain.
+    - name: Build forensiclens-cli (cache miss only)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        BIN_DIR: ${{ steps.build-key.outputs.bin-dir }}
+      run: |
+        set -euo pipefail
+        flags=(-c release --product forensiclens-cli)
+        if [ "$RUNNER_OS" = "Linux" ]; then
+          flags+=(--static-swift-stdlib)
+        fi
+        swift build "${flags[@]}"
+        mkdir -p "$BIN_DIR"
+        cp "$(swift build "${flags[@]}" --show-bin-path)/forensiclens-cli" "$BIN_DIR/"
+
+    - name: Add forensiclens-cli to PATH
+      shell: bash
+      env:
+        BIN_DIR: ${{ steps.build-key.outputs.bin-dir }}
+      run: |
+        set -euo pipefail
+        "$BIN_DIR/forensiclens-cli" --help > /dev/null
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
+
+    # Writes the paths to scan to a NUL-separated list, so file names with
+    # spaces (or anything else) survive intact.
+    #
+    # With `path` set: each line is used as-is if it exists, otherwise
+    # expanded as a glob. Directories are scanned recursively by the CLI.
+    #
+    # With `path` empty: image files added, copied, modified, or renamed
+    # by the pull request (against its base) or by the push (against the
+    # commit before it). When there's no usable base -- a brand-new
+    # branch, a manually triggered run, or another event type -- it falls
+    # back to the images changed by the latest commit.
+    - name: Resolve image files to scan
+      id: files
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        EXTENSIONS: ${{ inputs.extensions }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PUSH_BEFORE_SHA: ${{ github.event.before }}
+      run: |
+        set -euo pipefail
+        list="$RUNNER_TEMP/forensiclens-files.list"
+        : > "$list"
+        count=0
+
+        if [ -n "$INPUT_PATH" ]; then
+          shopt -s nullglob
+          shopt -s globstar 2>/dev/null || true
+          while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -z "$entry" ] && continue
+            if [ -e "$entry" ]; then
+              matches=("$entry")
+            else
+              # Unquoted on purpose: this is the glob expansion.
+              matches=($entry)
+            fi
+            if [ "${#matches[@]}" -eq 0 ]; then
+              echo "::warning::path \"$entry\" matched nothing."
+              continue
+            fi
+            for match in "${matches[@]}"; do
+              printf '%s\0' "$match" >> "$list"
+              count=$((count + 1))
+            done
+          done <<< "$INPUT_PATH"
+        else
+          base=""
+          range_style=""
+          case "$EVENT_NAME" in
+            pull_request|pull_request_target) base="$PR_BASE_SHA"; range_style="merge-base" ;;
+            push) base="$PUSH_BEFORE_SHA"; range_style="direct" ;;
+          esac
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "No base commit for this $EVENT_NAME event; scanning images changed by the latest commit."
+            changed() { git diff-tree --no-commit-id --name-only -r --root --diff-filter=ACMR -z HEAD; }
+          elif [ "$range_style" = "merge-base" ]; then
+            echo "Scanning images changed since the pull request's base ($base)."
+            changed() { git diff --name-only --diff-filter=ACMR -z "$base"...HEAD; }
+          else
+            echo "Scanning images changed since the previous push ($base)."
+            changed() { git diff --name-only --diff-filter=ACMR -z "$base" HEAD; }
+          fi
+
+          allowed=",$(printf '%s' "$EXTENSIONS" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'),"
+          while IFS= read -r -d '' file; do
+            [ -f "$file" ] || continue
+            case "$file" in *.*) ;; *) continue ;; esac
+            ext="$(printf '%s' "${file##*.}" | tr '[:upper:]' '[:lower:]')"
+            case "$allowed" in *",$ext,"*) ;; *) continue ;; esac
+            printf '%s\0' "$file" >> "$list"
+            count=$((count + 1))
+          done < <(changed)
+        fi
+
+        echo "list=$list" >> "$GITHUB_OUTPUT"
+        echo "count=$count" >> "$GITHUB_OUTPUT"
+        if [ "$count" -eq 0 ]; then
+          echo "No image files to scan."
+        else
+          echo "Scanning $count path(s):"
+          tr '\0' '\n' < "$list" | sed 's/^/  /'
+        fi
+
+    # Runs the same `forensiclens-cli batch` command documented in the
+    # README. Its exit status is recorded rather than failing this step
+    # right away, so the HTML report still gets uploaded when an image is
+    # flagged -- which is exactly when you'd want to look at it.
+    - name: Run forensiclens-cli batch scan
+      id: scan
+      if: steps.files.outputs.count != '0'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        FILE_LIST: ${{ steps.files.outputs.list }}
+        FAIL_THRESHOLD: ${{ inputs.fail-threshold }}
+        FORMAT: ${{ inputs.format }}
+        HTML_REPORT: ${{ inputs.html-report }}
+        EXTENSIONS: ${{ inputs.extensions }}
+        CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        case "$FORMAT" in
+          table) cli_format=text ;;
+          json|csv) cli_format="$FORMAT" ;;
+          *) echo "::error::format must be table, json, or csv, got \"$FORMAT\"."; exit 1 ;;
+        esac
+
+        args=(batch --format "$cli_format" --extensions "$EXTENSIONS")
+        if [ -n "$FAIL_THRESHOLD" ]; then
+          args+=(--fail-threshold "$FAIL_THRESHOLD")
+        fi
+        if [ -n "$CONFIG" ]; then
+          args+=(--config "$CONFIG")
+        fi
+        if [ "$HTML_REPORT" = "true" ]; then
+          report_dir="$RUNNER_TEMP/forensiclens-html-report"
+          args+=(--html-report-dir "$report_dir")
+          echo "report-dir=$report_dir" >> "$GITHUB_OUTPUT"
+        fi
+        while IFS= read -r -d '' file; do
+          # Keep a file named like "-x.jpg" from being read as an option.
+          case "$file" in -*) file="./$file" ;; esac
+          args+=("$file")
+        done < "$FILE_LIST"
+
+        status=0
+        forensiclens-cli "${args[@]}" || status=$?
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+
+    - name: Upload HTML report artifact
+      if: inputs.html-report == 'true' && steps.scan.outputs.report-dir != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.scan.outputs.report-dir }}
+        if-no-files-found: ignore
+
+    - name: Fail if an image met the threshold
+      if: steps.scan.outputs.exit-code != '' && steps.scan.outputs.exit-code != '0'
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.scan.outputs.exit-code }}
+        FAIL_THRESHOLD: ${{ inputs.fail-threshold }}
+      run: |
+        if [ "$EXIT_CODE" = "2" ]; then
+          echo "::error::ForensicLens flagged at least one image at or above the fail threshold ($FAIL_THRESHOLD). See the report above."
+        else
+          echo "::error::forensiclens-cli exited with status $EXIT_CODE. See the log above."
+        fi
+        exit "$EXIT_CODE"

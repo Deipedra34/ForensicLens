@@ -64,6 +64,16 @@ struct BatchReport: Sendable {
         self.entries = analyzed + skipped
     }
 
+    /// Analyzed entries whose score meets or exceeds `threshold`, highest
+    /// first -- the images that trip `batch --fail-threshold`. Skipped files
+    /// have no score, so they never count here.
+    func entries(scoringAtLeast threshold: Double) -> [BatchReportEntry] {
+        entries.filter { entry in
+            guard let score = entry.score else { return false }
+            return score >= threshold
+        }
+    }
+
     var analyzedCount: Int { entries.filter { $0.skipReason == nil }.count }
     var skippedCount: Int { entries.filter { $0.skipReason != nil }.count }
 }

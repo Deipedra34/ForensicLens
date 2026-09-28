@@ -88,21 +88,31 @@ enum CLI {
 
     // MARK: - batch subcommand
 
-    /// Handles `forensiclens-cli batch <directory> [options]`: scans a
-    /// directory for images, runs the same `ForensicLensEngine` pipeline
-    /// used by the single-image commands above against every one of them
-    /// concurrently, and writes out a combined report.
+    /// Handles `forensiclens-cli batch <path>... [options]`: scans each
+    /// directory given for images (and takes each image file given as-is),
+    /// runs the same `ForensicLensEngine` pipeline used by the single-image
+    /// commands above against every one of them concurrently, and writes
+    /// out a combined report. With `--fail-threshold`, it then exits
+    /// non-zero if any image scored at or above it -- what lets CI and
+    /// pre-commit hooks treat a detection as a failing check.
     ///
     /// Broken into its own function (rather than folded into `run`) since
     /// it's a genuinely different flow -- a directory positional instead of
     /// an image path, its own flag set, and an async pipeline -- not just
     /// another case of the single-image switch above it.
     private static func runBatch(_ parsed: ParsedArguments) async -> Int32 {
-        guard let directory = parsed.positionals.first else {
+        let inputPaths = parsed.positionals
+        guard let firstInput = inputPaths.first else {
             eprint("Error: missing <directory> argument.")
             printUsage()
             return 1
         }
+        // Shown in the report header, and used as the root that HTML report
+        // names are made relative to. With several inputs (e.g. the file
+        // list a pre-commit hook passes) there's no single directory, so
+        // report names fall back to each file's own name.
+        let directory = inputPaths.count == 1 ? firstInput : inputPaths.joined(separator: ", ")
+        let sourceRoot = inputPaths.count == 1 ? firstInput : ""
 
         let recursive = !parsed.flags.contains("--no-recursive")
 
@@ -134,6 +144,14 @@ enum CLI {
             return 1
         }
 
+        let failThreshold: Double?
+        do {
+            failThreshold = try parseFailThreshold(parsed)
+        } catch {
+            eprint("Error: \(error)")
+            return 1
+        }
+
         let configPath = parsed.options["--config"] ?? "forensiclens.yaml"
 
         let config: ForensicLensConfig
@@ -158,7 +176,7 @@ enum CLI {
 
         let files: [String]
         do {
-            files = try BatchFileScanner(extensions: extensions, recursive: recursive).scanFiles(in: directory)
+            files = try BatchFileScanner(extensions: extensions, recursive: recursive).scanFiles(in: inputPaths)
         } catch {
             eprint("Error: \(error)")
             return 1
@@ -177,7 +195,7 @@ enum CLI {
                 eprint("Error: could not create HTML report directory \"\(htmlReportDirectory)\": \(error)")
                 return 1
             }
-            htmlReports = BatchHTMLReportOptions(directory: htmlReportDirectory, threshold: htmlReportThreshold, sourceRoot: directory, files: files)
+            htmlReports = BatchHTMLReportOptions(directory: htmlReportDirectory, threshold: htmlReportThreshold, sourceRoot: sourceRoot, files: files)
         }
 
         let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config), tiling: tilingOverride, htmlReports: htmlReports)
@@ -213,7 +231,27 @@ enum CLI {
             print(rendered)
         }
 
+        if let failThreshold {
+            let failing = report.entries(scoringAtLeast: failThreshold)
+            if !failing.isEmpty {
+                eprint("\(failing.count) image(s) scored at or above --fail-threshold \(formatScore(failThreshold)):")
+                for entry in failing {
+                    eprint("  \(entry.filePath): \(formatScore(entry.score ?? 0)) (\(entry.verdict ?? ""))")
+                }
+                return failThresholdExitCode
+            }
+        }
+
         return 0
+    }
+
+    /// Exit status for a batch run where some image met `--fail-threshold`.
+    /// Distinct from the `1` every other error returns, so a CI script can
+    /// tell "an image was flagged" apart from "the scan itself broke".
+    static let failThresholdExitCode: Int32 = 2
+
+    private static func formatScore(_ score: Double) -> String {
+        score == score.rounded() ? String(Int(score)) : String(format: "%.1f", score)
     }
 
     /// `BatchRunner`'s per-file completion callback: logs a warning for a
@@ -301,6 +339,23 @@ enum CLI {
         return value
     }
 
+    /// Parses `--fail-threshold <score>`: when given, `batch` exits with
+    /// `failThresholdExitCode` after printing its report if any image's
+    /// score meets or exceeds it. Off (`nil`) unless given, so a plain
+    /// `batch` run always exits 0 on success, as it always has.
+    static func parseFailThreshold(_ parsed: ParsedArguments) throws -> Double? {
+        guard let raw = parsed.options["--fail-threshold"] else {
+            if parsed.flags.contains("--fail-threshold") {
+                throw CLIError.missingOptionValue("--fail-threshold")
+            }
+            return nil
+        }
+        guard let value = Double(raw), value.isFinite, value >= 0, value <= 100 else {
+            throw CLIError.invalidFailThreshold(raw)
+        }
+        return value
+    }
+
     struct ParsedArguments {
         let positionals: [String]
         let flags: Set<String>
@@ -361,7 +416,7 @@ enum CLI {
 
         USAGE:
           forensiclens-cli <command> <image-path> [--json] [--config <path>] [--html-report <path>]
-          forensiclens-cli batch <directory> [options]
+          forensiclens-cli batch <directory|file>... [options]
 
         COMMANDS:
           report              Run every enabled analyzer and print a combined report.
@@ -369,7 +424,7 @@ enum CLI {
           metadata            Run only EXIF/metadata analysis.
           clone               Run only copy-move (clone) detection.
           doublecompression   Run only double JPEG compression detection.
-          batch               Scan a directory of images and print one summary report.
+          batch               Scan directories and/or image files and print one summary report.
           help                Show this message.
 
         OPTIONS (report / ela / metadata / clone / doublecompression):
@@ -404,6 +459,12 @@ enum CLI {
           --html-report-threshold <score>
                                 Minimum score (exclusive) for an HTML report.
                                  Defaults to 0: any non-zero score.
+          --fail-threshold <score>
+                                After printing the report, exit with status 2
+                                 if any image scored at or above <score>
+                                 (0-100). Off by default. 70, where the
+                                 "likely manipulated" verdict starts, is a
+                                 sensible value for CI.
           --config <path>       Same as above.
           --tile-size <n>       Same as above, applied to every file in the batch.
           --no-tiling           Same as above, applied to every file in the batch.
@@ -419,6 +480,7 @@ enum CLI {
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json
           forensiclens-cli batch photos/ --html-report-dir reports/ --html-report-threshold 45
+          forensiclens-cli batch new-1.jpg new-2.png --fail-threshold 70
         """)
     }
 }
@@ -431,6 +493,7 @@ enum CLIError: Error, CustomStringConvertible {
     case missingOptionValue(String)
     case invalidHTMLReportThreshold(String)
     case thresholdWithoutReportDirectory
+    case invalidFailThreshold(String)
 
     var description: String {
         switch self {
@@ -444,6 +507,8 @@ enum CLIError: Error, CustomStringConvertible {
             return "--html-report-threshold must be a number from 0 to 100, got \"\(value)\"."
         case .thresholdWithoutReportDirectory:
             return "--html-report-threshold only applies together with --html-report-dir."
+        case .invalidFailThreshold(let value):
+            return "--fail-threshold must be a number from 0 to 100, got \"\(value)\"."
         case .invalidTileSize(let value):
             return "--tile-size must be a positive integer, got \"\(value)\"."
         case .conflictingTilingFlags:

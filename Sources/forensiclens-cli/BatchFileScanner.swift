@@ -3,11 +3,14 @@ import Foundation
 /// Errors raised while walking a directory for the `batch` command.
 enum BatchScanError: Error, CustomStringConvertible {
     case directoryNotFound(String)
+    case pathNotFound(String)
 
     var description: String {
         switch self {
         case .directoryNotFound(let path):
             return "\"\(path)\" is not a directory or does not exist."
+        case .pathNotFound(let path):
+            return "\"\(path)\" does not exist."
         }
     }
 }
@@ -56,6 +59,30 @@ struct BatchFileScanner: Sendable {
         return candidatePaths
             .filter(isMatchingFile)
             .sorted()
+    }
+
+    /// Returns every matching file across `paths`, where each path is
+    /// either a directory (scanned exactly like `scanFiles(in:)`) or a
+    /// single file (kept if its extension matches). This is what lets
+    /// `batch` take the explicit file list a pre-commit hook or a CI
+    /// "changed files" step hands it, not just one directory. Duplicates
+    /// are dropped and the result is sorted for deterministic output.
+    ///
+    /// - Throws: `BatchScanError.pathNotFound` if any path doesn't exist.
+    func scanFiles(in paths: [String]) throws -> [String] {
+        var files: Set<String> = []
+        for path in paths {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+                throw BatchScanError.pathNotFound(path)
+            }
+            if isDirectory.boolValue {
+                files.formUnion(try scanFiles(in: path))
+            } else if isMatchingFile(path) {
+                files.insert(path)
+            }
+        }
+        return files.sorted()
     }
 
     private func isMatchingFile(_ path: String) -> Bool {

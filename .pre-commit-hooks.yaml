@@ -1,0 +1,22 @@
+# pre-commit hook definitions (https://pre-commit.com). Add to another
+# repository's .pre-commit-config.yaml -- see INTEGRATION.md.
+#
+# `language: swift` has pre-commit build this package once (`swift build
+# -c release`) into its own cache and put forensiclens-cli on PATH, so it
+# needs a Swift toolchain on the machine (Linux or macOS). The hook then
+# runs the same `forensiclens-cli batch` command documented in the README,
+# with pre-commit appending the staged image files as its arguments.
+#
+# The default --fail-threshold of 70 is where the CLI's "likely
+# manipulated" verdict starts. Override it (or add any other batch flag,
+# such as --config) with `args:` in your .pre-commit-config.yaml; a later
+# --fail-threshold replaces this one.
+- id: forensiclens
+  name: ForensicLens image forensics
+  description: Scans staged JPEG/PNG images for signs of manipulation and blocks the commit if any scores at or above the fail threshold.
+  entry: forensiclens-cli batch --fail-threshold 70
+  language: swift
+  types_or: [jpeg, png]
+  # One batch run over every staged image gives one combined report; the
+  # CLI already analyzes files concurrently on its own.
+  require_serial: true
