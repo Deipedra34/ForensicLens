@@ -14,6 +14,10 @@ let package = Package(
         .executable(
             name: "forensiclens-cli",
             targets: ["forensiclens-cli"]
+        ),
+        .executable(
+            name: "forensiclens-eval",
+            targets: ["forensiclens-eval"]
         )
     ],
     dependencies: [],
@@ -64,10 +68,25 @@ let package = Package(
             path: "Sources/HTMLReporting"
         ),
 
+        // MARK: - Shared batch processing
+        //
+        // Directory scanning, per-file fault isolation, and the bounded
+        // concurrent runner behind `forensiclens-cli batch` (including its
+        // per-image HTML report hook). Pulled out of
+        // the CLI target into its own library so `forensiclens-eval` can
+        // reuse the exact same skip-don't-abort behavior on a dataset --
+        // an executable target can't depend on another executable target
+        // on Windows (see `BenchmarkReporting` below for the same reason).
+        .target(
+            name: "BatchProcessing",
+            dependencies: ["ForensicLens", "ImageDecoding", "HTMLReporting"],
+            path: "Sources/BatchProcessing"
+        ),
+
         // MARK: - Command line interface
         .executableTarget(
             name: "forensiclens-cli",
-            dependencies: ["ForensicLens", "ImageDecoding", "HTMLReporting"],
+            dependencies: ["ForensicLens", "ImageDecoding", "HTMLReporting", "BatchProcessing"],
             path: "Sources/forensiclens-cli"
         ),
 
@@ -112,10 +131,24 @@ let package = Package(
             path: "Sources/forensiclens-readme-updater"
         ),
 
+        // MARK: - Accuracy evaluation
+        //
+        // Runs the full ForensicLensEngine pipeline over a locally stored,
+        // labeled dataset of authentic vs. tampered images (e.g. CASIA,
+        // obtained separately by the user) and reports precision, recall,
+        // F1, accuracy, and a confusion matrix, optionally across a sweep
+        // of suspicion-score thresholds. Never downloads anything: it only
+        // reads a dataset that's already on disk.
+        .executableTarget(
+            name: "forensiclens-eval",
+            dependencies: ["ForensicLens", "ImageDecoding", "BatchProcessing"],
+            path: "Sources/forensiclens-eval"
+        ),
+
         // MARK: - Tests
         .testTarget(
             name: "ForensicLensTests",
-            dependencies: ["ForensicLens", "ImageDecoding", "HTMLReporting", "forensiclens-cli", "forensiclens-readme-updater", "BenchmarkReporting"],
+            dependencies: ["ForensicLens", "ImageDecoding", "HTMLReporting", "BatchProcessing", "forensiclens-cli", "forensiclens-readme-updater", "forensiclens-eval", "BenchmarkReporting"],
             path: "Tests/ForensicLensTests"
         )
     ]

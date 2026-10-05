@@ -18,7 +18,9 @@ Both should work offline, on macOS or Linux, with no extra setup. The test suite
 - `Sources/CStbImage`: the only C code in the project. Nothing outside `ImageDecoding` should ever import it directly.
 - `Sources/ImageDecoding`: the boundary between C and Swift. Exposes `PixelBuffer` and `ImageData`.
 - `Sources/ForensicLens`: the actual forensics library. The `Analyzer` protocol, the three analyzers, scoring, and config.
+- `Sources/BatchProcessing`: directory scanning, per-file fault isolation, and the bounded concurrent runner shared by `batch` and `forensiclens-eval`.
 - `Sources/forensiclens-cli`: the command-line tool.
+- `Sources/forensiclens-eval`: measures precision/recall/F1 against a labeled dataset you supply locally (see "Evaluation" in the README).
 - `Sources/forensiclens-benchmark`: backs `scripts/benchmark/run.sh`.
 
 ## Adding a new analyzer

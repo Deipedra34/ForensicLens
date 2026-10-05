@@ -4,7 +4,7 @@ import HTMLReporting
 import ImageDecoding
 
 /// What happened when `batch` tried to write one image's HTML report.
-enum BatchHTMLReportOutcome: Sendable, Equatable {
+public enum BatchHTMLReportOutcome: Sendable, Equatable {
     case written(fileName: String)
     case failed(reason: String)
 }
@@ -18,26 +18,26 @@ enum BatchHTMLReportOutcome: Sendable, Equatable {
 /// analysis tasks instead would make two images that sanitize to the same
 /// name (`a/b.jpg` and `a_b.jpg`) race for it, and which one got the `-2`
 /// suffix would depend on which finished first.
-struct BatchHTMLReportOptions: Sendable {
+public struct BatchHTMLReportOptions: Sendable {
     /// Directory the reports and `index.html` are written to.
-    let directory: String
+    public let directory: String
 
     /// An image gets a report only if its overall score is strictly above
     /// this. The default of 0 means "any non-zero score".
-    let threshold: Double
+    public let threshold: Double
 
     /// Report file name (within `directory`) for each source image path.
-    let fileNames: [String: String]
+    public let fileNames: [String: String]
 
-    static let indexFileName = "index.html"
+    public static let indexFileName = "index.html"
 
-    init(directory: String, threshold: Double, sourceRoot: String, files: [String]) {
+    public init(directory: String, threshold: Double, sourceRoot: String, files: [String]) {
         self.directory = directory
         self.threshold = threshold
         self.fileNames = Self.reportFileNames(for: files, sourceRoot: sourceRoot)
     }
 
-    func shouldGenerate(for report: ForensicReport) -> Bool {
+    public func shouldGenerate(for report: ForensicReport) -> Bool {
         report.overallScore > threshold
     }
 
@@ -45,7 +45,7 @@ struct BatchHTMLReportOptions: Sendable {
     /// `sourcePath`. Never throws: a failed write is returned as
     /// `.failed` so, like every other per-file problem in `batch`, it
     /// can't abort the rest of the run.
-    func writeReport(_ report: ForensicReport, image: ImageData, sourcePath: String) -> BatchHTMLReportOutcome {
+    public func writeReport(_ report: ForensicReport, image: ImageData, sourcePath: String) -> BatchHTMLReportOutcome {
         guard let fileName = fileNames[sourcePath] else {
             return .failed(reason: "no report file name was planned for this image")
         }
@@ -62,7 +62,7 @@ struct BatchHTMLReportOptions: Sendable {
     /// Writes `index.html`, linking every report that was successfully
     /// written, and returns its path.
     @discardableResult
-    func writeIndex(for results: [BatchAnalysisResult], scannedDirectory: String) throws -> String {
+    public func writeIndex(for results: [BatchAnalysisResult], scannedDirectory: String) throws -> String {
         let entries = results.compactMap { result -> HTMLReportIndexEntry? in
             guard case .analyzed(let report) = result.outcome,
                   case .written(let fileName)? = result.htmlReport
@@ -80,7 +80,7 @@ struct BatchHTMLReportOptions: Sendable {
     /// `nested_photo.jpg.html`), adding a numeric suffix on collision.
     /// Collisions are checked case-insensitively, since the default
     /// filesystems on macOS and Windows are, and `index.html` is reserved.
-    static func reportFileNames(for files: [String], sourceRoot: String) -> [String: String] {
+    public static func reportFileNames(for files: [String], sourceRoot: String) -> [String: String] {
         var used: Set<String> = [indexFileName]
         var names: [String: String] = [:]
 

@@ -1,11 +1,11 @@
 import Foundation
 
 /// Errors raised while walking a directory for the `batch` command.
-enum BatchScanError: Error, CustomStringConvertible {
+public enum BatchScanError: Error, CustomStringConvertible {
     case directoryNotFound(String)
     case pathNotFound(String)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .directoryNotFound(let path):
             return "\"\(path)\" is not a directory or does not exist."
@@ -22,21 +22,27 @@ enum BatchScanError: Error, CustomStringConvertible {
 /// API, so recursive and non-recursive scans behave the same way on macOS
 /// and Linux. This type only ever deals with paths on disk -- it has no
 /// idea what `ImageData` or `Analyzer` are -- which is also why it lives in
-/// the CLI target and not in `ForensicLens` itself: directory walking is a
-/// concern of "the CLI reads a folder", not of the analysis library.
-struct BatchFileScanner: Sendable {
+/// `BatchProcessing` (shared by `forensiclens-cli` and `forensiclens-eval`)
+/// and not in `ForensicLens` itself: directory walking is a concern of "a
+/// command-line tool reads a folder", not of the analysis library.
+public struct BatchFileScanner: Sendable {
     /// Lowercased extensions (without the leading dot) to treat as images.
-    let extensions: Set<String>
+    public let extensions: Set<String>
 
     /// Whether to walk into subdirectories or only look at the top level.
-    let recursive: Bool
+    public let recursive: Bool
+
+    public init(extensions: Set<String>, recursive: Bool) {
+        self.extensions = extensions
+        self.recursive = recursive
+    }
 
     /// Returns every matching file path under `directory`, sorted for
     /// deterministic output.
     ///
     /// - Throws: `BatchScanError.directoryNotFound` if `directory` doesn't
     ///   exist or isn't a directory.
-    func scanFiles(in directory: String) throws -> [String] {
+    public func scanFiles(in directory: String) throws -> [String] {
         let fileManager = FileManager.default
 
         var isDirectory: ObjCBool = false
@@ -69,7 +75,7 @@ struct BatchFileScanner: Sendable {
     /// are dropped and the result is sorted for deterministic output.
     ///
     /// - Throws: `BatchScanError.pathNotFound` if any path doesn't exist.
-    func scanFiles(in paths: [String]) throws -> [String] {
+    public func scanFiles(in paths: [String]) throws -> [String] {
         var files: Set<String> = []
         for path in paths {
             var isDirectory: ObjCBool = false

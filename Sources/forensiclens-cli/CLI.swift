@@ -1,4 +1,5 @@
 import Foundation
+import BatchProcessing
 import ForensicLens
 import HTMLReporting
 import ImageDecoding
@@ -199,7 +200,7 @@ enum CLI {
         }
 
         let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config), tiling: tilingOverride, htmlReports: htmlReports)
-        let results = await BatchRunner.run(files: files, analyzer: analyzer, maxConcurrency: maxConcurrency, onFileComplete: reportBatchProgress)
+        let results = await BatchRunner.run(files: files, analyzer: analyzer, maxConcurrency: maxConcurrency, onFileComplete: BatchRunner.logProgressToStandardError)
 
         if let htmlReports {
             do {
@@ -252,25 +253,6 @@ enum CLI {
 
     private static func formatScore(_ score: Double) -> String {
         score == score.rounded() ? String(Int(score)) : String(format: "%.1f", score)
-    }
-
-    /// `BatchRunner`'s per-file completion callback: logs a warning for a
-    /// skipped file immediately (rather than only surfacing it in the
-    /// final report), then updates a "N/total processed" progress line.
-    /// Everything here goes to stderr, so it never interferes with the
-    /// report -- written to stdout or `--output` -- that `runBatch` emits
-    /// once the whole batch finishes.
-    @Sendable
-    private static func reportBatchProgress(result: BatchAnalysisResult, completed: Int, total: Int) {
-        if case .skipped(let reason) = result.outcome {
-            eprint("warning: skipping \(result.filePath): \(reason)")
-        }
-        if case .failed(let reason)? = result.htmlReport {
-            eprint("warning: no HTML report for \(result.filePath): \(reason)")
-        }
-        let progressLine = "\r\(completed)/\(total) processed" + (completed == total ? "\n" : "")
-        guard let data = progressLine.data(using: .utf8) else { return }
-        FileHandle.standardError.write(data)
     }
 
     // MARK: - shared helpers

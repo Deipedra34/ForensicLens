@@ -404,13 +404,93 @@ forensiclens-cli report large-photo.bmp --tile-size 512 --json
 forensiclens-cli report large-photo.bmp --no-tiling --json
 ```
 
+## Evaluation
+
+The benchmark above measures how *fast* ForensicLens is. `forensiclens-eval` measures how *accurate* it is: it runs the full analysis pipeline (the same `ForensicLensEngine` / `SuspicionScorer` path and the same skip-on-error fault isolation `batch` uses) over a labeled dataset of authentic and tampered images, flags each image whose suspicion score meets a threshold, and reports precision, recall, F1, accuracy, and the confusion matrix. "Tampered" is the positive class, so precision answers "of the images ForensicLens flagged, how many were really tampered?" and recall answers "of the tampered images, how many did it flag?"
+
+### Dataset layout
+
+`--dataset` accepts either of two layouts:
+
+1. **Folders** (recommended): a root directory with an `authentic/` and a `tampered/` subdirectory. Each is scanned recursively, so nested folders (e.g. `tampered/CM/` and `tampered/Sp/`) are fine. Which files count as images is controlled by `--extensions` (default: `bmp,jpeg,jpg,pgm,png,ppm,tif,tiff`).
+
+   ```
+   my-dataset/
+     authentic/
+       img001.bmp
+       ...
+     tampered/
+       img101.bmp
+       ...
+   ```
+
+2. **CSV manifest**: a file with one `path,label` row per image, for datasets that don't naturally split into two folders. Relative paths resolve against the manifest's own directory; an optional `path,label` header row, blank lines, and `#` comments are ignored; paths containing commas can be double-quoted. Labels are `authentic` or `tampered` (case-insensitive), and the aliases `au`/`tp` (CASIA's filename prefixes), `real`/`fake`, `original`/`forged`, and `0`/`1` are accepted too.
+
+   ```csv
+   path,label
+   images/Au_ani_00001.bmp,authentic
+   images/Tp_D_NRN_S_N_ani00018_sec00096_00138.bmp,tampered
+   ```
+
+A missing `authentic/` or `tampered/` folder, an empty class, a malformed manifest line, or an unknown label stops the run with an error naming the problem (and the manifest line number, where relevant). An individual unreadable or undecodable image, on the other hand, is logged as a warning, skipped, excluded from the metrics, and listed under `skipped` in the JSON report -- exactly like `batch`.
+
+### Using CASIA
+
+[CASIA](http://forensics.idealtest.org/) (v1.0 and v2.0), from the Institute of Automation, Chinese Academy of Sciences, is the standard academic benchmark for image tampering detection. **It is not redistributable and is not included in this repository.** You have to request/download it yourself from its official source and use it under the terms of its license. `forensiclens-eval` never downloads anything: it only reads a dataset you've already placed on disk.
+
+CASIA doesn't use this project's folder names. Both versions ship authentic images in an `Au/` folder and tampered images in a `Tp/` folder (CASIA v1.0 further splits `Tp/` into `CM/` copy-move and `Sp/` splicing subfolders), and every filename is prefixed `Au_` or `Tp_`. Ground-truth masks, if you downloaded them, are a separate set of files: keep them out of the dataset folders, since they aren't images to classify.
+
+There's one more step: ForensicLens's built-in decoder currently handles uncompressed BMP and PPM/PGM pixels only (see "Image format support" above). CASIA's JPEGs would only get metadata analysis, and its TIFFs would be skipped as unrecognized. So convert everything to uncompressed BMP while copying it into place. Decoding to a lossless format keeps the pixels exactly as the JPEG decoded them -- including the compression artifacts ELA and double-compression detection look for -- so nothing the analyzers need is lost. With [ImageMagick](https://imagemagick.org/):
+
+```sh
+mkdir -p casia2-prepared/authentic casia2-prepared/tampered
+magick mogrify -path casia2-prepared/authentic -format bmp -type TrueColor CASIA2/Au/*.jpg CASIA2/Au/*.bmp
+magick mogrify -path casia2-prepared/tampered  -format bmp -type TrueColor CASIA2/Tp/*.jpg CASIA2/Tp/*.tif
+```
+
+(For CASIA v1.0, point the second command at both `Tp/CM/` and `Tp/Sp/`.) If you'd rather keep everything in one flat folder, build a manifest from the filename prefixes instead:
+
+```sh
+cd casia2-flat
+{ echo "path,label"
+  for f in *.bmp; do
+    case "$f" in
+      Au_*) echo "$f,authentic" ;;
+      Tp_*) echo "$f,tampered" ;;
+    esac
+  done; } > manifest.csv
+```
+
+### Running it
+
+```sh
+# Single threshold (default 45, where SuspicionScorer's verdict turns "suspicious")
+swift run -c release forensiclens-eval --dataset casia2-prepared
+
+# A custom threshold, also saving the full report (metrics + per-image scores) as JSON
+swift run -c release forensiclens-eval --dataset casia2-prepared --threshold 30 --output eval.json
+
+# Sweep thresholds 0-100 in steps of 5 and report which one maximizes F1
+swift run -c release forensiclens-eval --dataset casia2-prepared --sweep
+
+# Finer sweep over a narrower range, exported as CSV for plotting precision/recall curves
+swift run -c release forensiclens-eval --dataset casia2-flat/manifest.csv \
+  --sweep --sweep-min 10 --sweep-max 60 --sweep-step 1 --csv sweep.csv --output sweep.json
+```
+
+Images are scored once per run, so a sweep costs no more analysis time than a single threshold. The sweep's best-F1 threshold is the number to use when tuning the score you act on from `forensiclens-cli`. `--config` takes the same `forensiclens.yaml` as the CLI, so you can measure how a config change affects accuracy, and `--max-concurrency` bounds parallelism like it does for `batch`. Run `forensiclens-eval --help` for every option.
+
+### Not part of CI
+
+Unlike the benchmark table above, which `.github/workflows/benchmark.yml` regenerates automatically, **evaluation results are not produced by CI** and never will be: the dataset can't be bundled with the repository or downloaded automatically. Run the evaluation locally and record results by hand, noting the dataset and version, how it was prepared, the ForensicLens commit, the config, and the threshold, so the number can be reproduced. No CASIA results are published in this README yet. The `swift test` suite only checks the evaluation tool itself, against a tiny synthetic dataset.
+
 ## Testing
 
 ```sh
 swift test
 ```
 
-The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`.
+The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`. `EvaluationMetricsTests.swift` checks the precision/recall/F1/accuracy and threshold-sweep math against hand-worked confusion matrices, with no images involved, and `EvaluationToolTests.swift` covers `forensiclens-eval`'s dataset layouts and manifest parsing, its error messages for a malformed dataset, and an end-to-end run (single threshold and sweep, JSON and CSV output) over a handful of synthetic authentic and copy-move images written to a temporary directory, including a corrupt file that must be skipped rather than abort the run.
 
 To generate the same coverage report as CI locally (Linux/macOS with the Swift toolchain's `llvm-cov`/`llvm-profdata`):
 

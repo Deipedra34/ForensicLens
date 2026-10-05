@@ -1,4 +1,5 @@
 import XCTest
+import BatchProcessing
 import ForensicLens
 import ImageDecoding
 @testable import forensiclens_cli

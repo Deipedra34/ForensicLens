@@ -1,3 +1,4 @@
+import BatchProcessing
 import ForensicLens
 
 extension ForensicReport {

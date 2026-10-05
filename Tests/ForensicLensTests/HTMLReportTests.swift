@@ -1,4 +1,5 @@
 import XCTest
+import BatchProcessing
 import ForensicLens
 import HTMLReporting
 import ImageDecoding
