@@ -41,6 +41,20 @@ import ImageDecoding
 /// phase with its neighbors', the same way an untuned `tileOverlap` would
 /// for ELA -- worth knowing if `blockStride` is ever hand-tuned away from
 /// an 8-multiple on a large, tiled image.
+///
+/// The feature-matching pass (`FeatureCloneDetector`) is tiled the same
+/// way, for the same reason: every tile contributes its keypoints --
+/// extracted from that tile's buffer, kept only if they fall in its core,
+/// translated to global coordinates -- to one image-wide pool, and
+/// descriptor matching plus RANSAC run once over the whole pool. Each tile
+/// gets a share of `maximumKeypoints` proportional to its area, and the
+/// pool is capped back to `maximumKeypoints` by corner strength. Unlike
+/// block candidates, this pool isn't bit-for-bit what an untiled pass would
+/// extract: each tile builds its own scale pyramid, whose resampling grid
+/// is anchored at the tile's origin, so keypoints on coarser levels can
+/// shift by a fraction of a pixel. That's well inside RANSAC's tolerance,
+/// so the same clones are found, but the exact keypoint and inlier counts
+/// can differ slightly between a tiled and an untiled run.
 enum TiledCloneDetection {
     static func run(image: ImageData, config: ForensicLensConfig) throws -> AnalyzerFinding {
         guard let fullBuffer = image.pixels else {
@@ -73,14 +87,23 @@ enum TiledCloneDetection {
         // legal `cloneDetection.blockSize` in `forensiclens.yaml`) could
         // otherwise round back down below `blockSize` and reopen exactly
         // the missed-block gap this halo exists to close.
+        //
+        // The feature-matching pass has the same need on a larger scale: a
+        // keypoint's description patch reaches `FeatureExtractor
+        // .supportRadius` pixels out at the coarsest pyramid level, so the
+        // halo grows to cover that too when the pass is enabled (still
+        // capped at one tile's size by `TilePlan`).
         let blockSizeCeiledTo8 = ((blockSize + 7) / 8) * 8
-        let halo = max(config.tiling.tileOverlap, blockSizeCeiledTo8)
+        let featureSupportCeiledTo8 = settings.featureMatchingEnabled ? ((FeatureExtractor.supportRadius + 7) / 8) * 8 : 0
+        let halo = max(config.tiling.tileOverlap, blockSizeCeiledTo8, featureSupportCeiledTo8)
         let tiles = TilePlan.build(imageWidth: fullBuffer.width, imageHeight: fullBuffer.height, tileSize: config.tiling.tileSize, halo: halo)
+        let featureDetector = FeatureCloneDetector(settings: .init(settings))
 
         guard !tiles.isEmpty else {
             let candidates = CloneDetectionAnalyzer.candidateBlocks(fullBuffer, blockSize: blockSize, stride: stride, minimumVariance: settings.minimumBlockVariance)
             let matches = CloneDetectionAnalyzer.findMatches(candidates, similarityThreshold: settings.similarityThreshold, minimumDistance: settings.minimumBlockDistance)
-            return CloneDetectionAnalyzer.makeFinding(analyzerID: "clone", matches: matches, imageWidth: fullBuffer.width, imageHeight: fullBuffer.height, settings: settings)
+            let featurePairs = settings.featureMatchingEnabled ? featureDetector.detect(in: fullBuffer).pairs : []
+            return CloneDetectionAnalyzer.makeFinding(analyzerID: "clone", matches: matches, featurePairs: featurePairs, imageWidth: fullBuffer.width, imageHeight: fullBuffer.height, settings: settings)
         }
 
         // Small (position + a 16-`Double` feature vector each), so pooling
@@ -89,6 +112,9 @@ enum TiledCloneDetection {
         // what's actually deferred until every tile has contributed, not
         // any pixel data.
         var globalCandidates: [CloneDetectionAnalyzer.Candidate] = []
+        var globalKeypoints: [Keypoint] = []
+        let maximumKeypoints = featureDetector.settings.sanitizedMaximumKeypoints
+        let imageArea = Double(fullBuffer.width * fullBuffer.height)
 
         for tile in tiles {
             // Only one tile's pixels are ever resident here; it's dropped
@@ -118,13 +144,39 @@ enum TiledCloneDetection {
                     feature: candidate.feature
                 ))
             }
+
+            if settings.featureMatchingEnabled {
+                let share = Double(maximumKeypoints) * Double(tile.extract.width * tile.extract.height) / imageArea
+                let localKeypoints = FeatureExtractor.extract(from: tileBuffer, maximumKeypoints: max(1, Int(share.rounded(.up))))
+                for keypoint in localKeypoints {
+                    // Same core-ownership rule as for blocks above, so a
+                    // keypoint seen by two overlapping tiles is pooled once.
+                    let global = keypoint.offsetBy(dx: tile.extract.x, dy: tile.extract.y)
+                    let globalX = Int(global.position.x.rounded(.down))
+                    let globalY = Int(global.position.y.rounded(.down))
+                    guard globalX >= tile.core.x, globalX < tile.core.x + tile.core.width,
+                          globalY >= tile.core.y, globalY < tile.core.y + tile.core.height
+                    else { continue }
+                    globalKeypoints.append(global)
+                }
+            }
         }
 
-        guard globalCandidates.count >= 2 else {
+        var featurePairs: [FeatureClonePair] = []
+        if settings.featureMatchingEnabled {
+            globalKeypoints.sort { lhs, rhs in
+                if lhs.response != rhs.response { return lhs.response > rhs.response }
+                return (lhs.position.y, lhs.position.x) < (rhs.position.y, rhs.position.x)
+            }
+            let pooled = Array(globalKeypoints.prefix(maximumKeypoints))
+            featurePairs = featureDetector.detect(keypoints: pooled, imageWidth: fullBuffer.width, imageHeight: fullBuffer.height).pairs
+        }
+
+        guard globalCandidates.count >= 2 || !featurePairs.isEmpty else {
             return AnalyzerFinding.clean(analyzerID: "clone", summary: "No non-uniform regions found to compare; image may be flat or too small.")
         }
 
-        let matches = CloneDetectionAnalyzer.findMatches(globalCandidates, similarityThreshold: settings.similarityThreshold, minimumDistance: settings.minimumBlockDistance)
-        return CloneDetectionAnalyzer.makeFinding(analyzerID: "clone", matches: matches, imageWidth: fullBuffer.width, imageHeight: fullBuffer.height, settings: settings)
+        let matches = globalCandidates.count >= 2 ? CloneDetectionAnalyzer.findMatches(globalCandidates, similarityThreshold: settings.similarityThreshold, minimumDistance: settings.minimumBlockDistance) : []
+        return CloneDetectionAnalyzer.makeFinding(analyzerID: "clone", matches: matches, featurePairs: featurePairs, imageWidth: fullBuffer.width, imageHeight: fullBuffer.height, settings: settings)
     }
 }

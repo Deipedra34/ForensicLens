@@ -90,8 +90,35 @@ cloneDetection:
   similarityThreshold: 6
 
   # Minimum pixel distance required between two matched blocks' positions,
-  # so a block never trivially "matches" its own near neighbors.
+  # so a block never trivially "matches" its own near neighbors. Also the
+  # minimum distance between two matched keypoints in the feature-matching
+  # pass below.
   minimumBlockDistance: 24
+
+  # Whether to run a second, rotation/scale-tolerant pass after block
+  # matching. Block matching only finds a patch pasted back unmodified; this
+  # pass matches keypoint descriptors across a scale pyramid and uses RANSAC
+  # to confirm a group of matches agrees on one rotate/scale transform, so
+  # it also finds a patch that was rotated or resized before pasting. It
+  # costs extra time (roughly linear in pixel count) and needs a cloned
+  # region of about 40-50px or more to have enough keypoints. Set to false
+  # (or pass --no-feature-matching) for block matching only.
+  featureMatchingEnabled: true
+
+  # Fewest distinct keypoint matches that must agree on one geometric
+  # transform before the feature-matching pass reports a clone. Higher is
+  # stricter (fewer coincidental hits on repetitive texture) but misses
+  # smaller clones. Minimum 3.
+  minimumMatchedKeypoints: 12
+
+  # RANSAC inlier threshold, in pixels: how far a matched keypoint may land
+  # from where the fitted transform puts it and still count as agreeing.
+  ransacReprojectionThreshold: 3
+
+  # Cap on keypoints extracted per image by the feature-matching pass.
+  # Matching cost grows quadratically with this; raise it to find smaller
+  # clones in large photos.
+  maximumKeypoints: 2000
 
 doubleCompression:
   # Whether double JPEG compression detection runs as part of a combined

@@ -36,6 +36,19 @@ import ImageDecoding
 /// plays a similar role on a different axis: a smaller stride overlaps
 /// blocks more and catches clones the block grid would otherwise straddle,
 /// at the cost of comparing a lot more blocks.
+///
+/// Block matching compares pixels at the same orientation and scale, so a
+/// patch that was rotated or rescaled before being pasted back slips right
+/// past it. That's what the second, feature-matching pass is for (on by
+/// default; `featureMatchingEnabled` in config): `FeatureCloneDetector`
+/// matches rotation-steered keypoint descriptors across a scale pyramid
+/// and uses RANSAC to confirm that a group of matches agrees on one
+/// geometric transform, recovering its rotation and scale. Both passes
+/// report into this one `clone` finding -- they look for the same kind of
+/// edit, so the finding's score is the stronger of the two rather than a
+/// sum, and a clone both passes catch isn't counted twice. Block matching
+/// stays first and unchanged as the cheap path for the plain, unmodified
+/// copy-move.
 public struct CloneDetectionAnalyzer: Analyzer {
     public let identifier = "clone"
     public let displayName = "Copy-Move (Clone) Detection"
@@ -66,30 +79,64 @@ public struct CloneDetectionAnalyzer: Analyzer {
         }
 
         let candidates = Self.candidateBlocks(buffer, blockSize: blockSize, stride: stride, minimumVariance: settings.minimumBlockVariance)
-        guard candidates.count >= 2 else {
+        let featurePairs = settings.featureMatchingEnabled ? FeatureCloneDetector(settings: .init(settings)).detect(in: buffer).pairs : []
+        guard candidates.count >= 2 || !featurePairs.isEmpty else {
             return AnalyzerFinding.clean(analyzerID: identifier, summary: "No non-uniform regions found to compare; image may be flat or too small.")
         }
 
-        let matches = Self.findMatches(candidates, similarityThreshold: settings.similarityThreshold, minimumDistance: settings.minimumBlockDistance)
-        return Self.makeFinding(analyzerID: identifier, matches: matches, imageWidth: buffer.width, imageHeight: buffer.height, settings: settings)
+        let matches = candidates.count >= 2 ? Self.findMatches(candidates, similarityThreshold: settings.similarityThreshold, minimumDistance: settings.minimumBlockDistance) : []
+        return Self.makeFinding(analyzerID: identifier, matches: matches, featurePairs: featurePairs, imageWidth: buffer.width, imageHeight: buffer.height, settings: settings)
     }
 
     /// Builds the final `AnalyzerFinding` from a completed set of block
-    /// matches -- the exact same scoring and indicator-building logic
-    /// `analyze` uses for a single, untiled image, factored out so
-    /// `TiledCloneDetection` can reuse it verbatim for `matches` gathered
-    /// globally across every tile (passing the *full* image's dimensions,
-    /// not any one tile's). Keeping one scoring implementation shared by
-    /// both paths is what makes a tiled and an untiled clone detection
-    /// score numerically identical (not just "close") whenever the same
-    /// matches are found, rather than two scoring formulas that could
-    /// quietly drift apart.
-    static func makeFinding(analyzerID: String, matches: [Match], imageWidth: Int, imageHeight: Int, settings: ForensicLensConfig.CloneDetectionConfig) -> AnalyzerFinding {
-        let blockSize = max(4, settings.blockSize)
-        guard matches.count >= minimumReportablePairs else {
+    /// matches and feature-matched clone pairs -- the exact same scoring
+    /// and indicator-building logic `analyze` uses for a single, untiled
+    /// image, factored out so `TiledCloneDetection` can reuse it verbatim
+    /// for `matches` and `featurePairs` gathered globally across every tile
+    /// (passing the *full* image's dimensions, not any one tile's). Keeping
+    /// one scoring implementation shared by both paths is what makes a
+    /// tiled and an untiled clone detection score numerically identical
+    /// (not just "close") whenever the same matches are found, rather than
+    /// two scoring formulas that could quietly drift apart.
+    ///
+    /// Each pass is scored with the same shape -- up to 80 points for how
+    /// much of the image the duplicated regions cover, up to 20 for how
+    /// much matching evidence there is -- and the finding takes the higher
+    /// of the two. With no feature pairs, the result is exactly what block
+    /// matching alone has always produced.
+    static func makeFinding(analyzerID: String, matches: [Match], featurePairs: [FeatureClonePair] = [], imageWidth: Int, imageHeight: Int, settings: ForensicLensConfig.CloneDetectionConfig) -> AnalyzerFinding {
+        let hasBlockMatches = matches.count >= minimumReportablePairs
+        guard hasBlockMatches || !featurePairs.isEmpty else {
             return AnalyzerFinding.clean(analyzerID: analyzerID, summary: "No duplicated regions detected.")
         }
 
+        var indicators: [Indicator] = []
+        var blockScore = 0.0
+        if hasBlockMatches {
+            let block = blockMatchingEvidence(matches: matches, imageWidth: imageWidth, imageHeight: imageHeight, settings: settings)
+            blockScore = block.score
+            indicators.append(contentsOf: block.indicators)
+        }
+
+        let feature = featureMatchingEvidence(pairs: featurePairs, imageWidth: imageWidth, imageHeight: imageHeight)
+        indicators.append(contentsOf: feature.indicators)
+
+        let summary: String
+        switch (hasBlockMatches, featurePairs.isEmpty) {
+        case (true, true):
+            summary = "\(matches.count) duplicated region pair(s) found, suggesting copy-move editing."
+        case (false, _):
+            summary = "\(featurePairs.count) rotated/rescaled duplicated region pair(s) confirmed by feature matching, suggesting copy-move editing."
+        case (true, false):
+            summary = "\(matches.count) duplicated region pair(s) found by block matching and \(featurePairs.count) confirmed by rotation/scale-tolerant feature matching, suggesting copy-move editing."
+        }
+        return AnalyzerFinding(analyzerID: analyzerID, score: max(blockScore, feature.score), summary: summary, indicators: indicators)
+    }
+
+    /// Block matching's score and indicators: one summary indicator
+    /// carrying every matched block, then one per closest match.
+    private static func blockMatchingEvidence(matches: [Match], imageWidth: Int, imageHeight: Int, settings: ForensicLensConfig.CloneDetectionConfig) -> (score: Double, indicators: [Indicator]) {
+        let blockSize = max(4, settings.blockSize)
         let uniqueBlocks = Set(matches.flatMap { [$0.a, $0.b] })
         let imageArea = Double(imageWidth * imageHeight)
         let coverageFraction = imageArea > 0 ? min(1.0, Double(uniqueBlocks.count * blockSize * blockSize) / imageArea) : 0
@@ -123,8 +170,39 @@ public struct CloneDetectionAnalyzer: Analyzer {
             ))
         }
 
-        let summary = "\(matches.count) duplicated region pair(s) found, suggesting copy-move editing."
-        return AnalyzerFinding(analyzerID: analyzerID, score: score, summary: summary, indicators: indicators)
+        return (score, indicators)
+    }
+
+    /// The feature-matching pass's score and indicators: one indicator per
+    /// confirmed pair, carrying exactly its two regions (source, copy) and
+    /// the recovered rotation and scale.
+    private static func featureMatchingEvidence(pairs: [FeatureClonePair], imageWidth: Int, imageHeight: Int) -> (score: Double, indicators: [Indicator]) {
+        guard !pairs.isEmpty else { return (0, []) }
+
+        let imageArea = Double(imageWidth * imageHeight)
+        func coverage(_ regions: [Region]) -> Double {
+            guard imageArea > 0 else { return 0 }
+            return min(1.0, Double(regions.reduce(0) { $0 + $1.width * $1.height }) / imageArea)
+        }
+        func score(coverage: Double, inliers: Int) -> Double {
+            min(80, (coverage / 0.02) * 80) + min(20, Double(inliers))
+        }
+
+        let totalScore = score(
+            coverage: coverage(pairs.flatMap { [$0.source, $0.target] }),
+            inliers: pairs.reduce(0) { $0 + $1.inlierCount }
+        )
+
+        let indicators = pairs.map { pair in
+            Indicator(
+                message: "Region at (\(pair.source.x),\(pair.source.y)) \(pair.source.width)x\(pair.source.height) matches region at (\(pair.target.x),\(pair.target.y)) \(pair.target.width)x\(pair.target.height) "
+                    + "under a rotation of \(String(format: "%.1f", pair.rotationDegrees)) degrees and a scale of \(String(format: "%.2f", pair.scale))x "
+                    + "(\(pair.inlierCount) keypoint matches agree on this transform after RANSAC verification).",
+                weight: score(coverage: coverage([pair.source, pair.target]), inliers: pair.inlierCount),
+                regions: [pair.source, pair.target]
+            )
+        }
+        return (totalScore, indicators)
     }
 
     // MARK: - Block extraction

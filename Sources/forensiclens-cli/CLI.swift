@@ -50,7 +50,7 @@ enum CLI {
         }
 
         do {
-            let config = try ConfigLoader.load(contentsOfFile: configPath)
+            let config = try applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath))
             let rawBytes = try readFile(imagePath)
             let image = try ImageData.load(rawBytes)
             let engine = ForensicLensEngine(config: config)
@@ -157,7 +157,7 @@ enum CLI {
 
         let config: ForensicLensConfig
         do {
-            config = try ConfigLoader.load(contentsOfFile: configPath)
+            config = try applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath))
         } catch {
             eprint("Error: \(error)")
             return 1
@@ -263,7 +263,21 @@ enum CLI {
     }
 
     /// Flags this CLI recognizes that take no following value.
-    private static let valuelessFlags: Set<String> = ["--json", "--no-recursive", "--no-tiling"]
+    private static let valuelessFlags: Set<String> = ["--json", "--no-recursive", "--no-tiling", "--no-feature-matching"]
+
+    /// Applies `--no-feature-matching` on top of the loaded config: turns
+    /// off clone detection's rotation/scale-tolerant feature-matching pass
+    /// for this run, leaving block matching (and every other setting) as
+    /// configured. The same as `featureMatchingEnabled: false` under
+    /// `cloneDetection` in forensiclens.yaml, for a one-off run without
+    /// editing the file. Not `private`, so `ForensicLensTests` can exercise
+    /// it directly via `@testable import`.
+    static func applyingFeatureMatchingFlag(_ parsed: ParsedArguments, to config: ForensicLensConfig) -> ForensicLensConfig {
+        guard parsed.flags.contains("--no-feature-matching") else { return config }
+        var updated = config
+        updated.cloneDetection.featureMatchingEnabled = false
+        return updated
+    }
 
     /// Builds a `TilingOverride` from `--tile-size <n>` / `--no-tiling`,
     /// shared by both the single-image commands and `batch` since tiling
@@ -425,6 +439,10 @@ enum CLI {
                             on the same image. Cannot combine with --no-tiling.
           --no-tiling      Force single-block processing, even above
                             tilingThreshold. Cannot combine with --tile-size.
+          --no-feature-matching
+                           Skip clone detection's rotation/scale-tolerant
+                            feature-matching pass and run block matching
+                            only (faster; misses rotated/rescaled clones).
 
         OPTIONS (batch):
           --no-recursive        Only scan the top-level directory, skip subdirectories.
@@ -450,6 +468,7 @@ enum CLI {
           --config <path>       Same as above.
           --tile-size <n>       Same as above, applied to every file in the batch.
           --no-tiling           Same as above, applied to every file in the batch.
+          --no-feature-matching Same as above, applied to every file in the batch.
 
         EXAMPLES:
           forensiclens-cli report photo.bmp
@@ -458,6 +477,7 @@ enum CLI {
           forensiclens-cli clone photo.ppm --config custom.yaml
           forensiclens-cli report large-photo.bmp --tile-size 512
           forensiclens-cli report large-photo.bmp --no-tiling
+          forensiclens-cli clone photo.ppm --no-feature-matching
           forensiclens-cli batch photos/
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json

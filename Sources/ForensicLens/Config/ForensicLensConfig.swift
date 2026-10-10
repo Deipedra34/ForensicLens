@@ -114,16 +114,56 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
 
         /// Minimum pixel distance required between two matched blocks'
         /// positions. Prevents a block from trivially "matching" its own
-        /// near neighbors under overlap.
+        /// near neighbors under overlap. Also applies to the feature-matching
+        /// pass, as the minimum distance between two matched keypoints.
         public var minimumBlockDistance: Int
 
-        public init(enabled: Bool, blockSize: Int, blockStride: Int, minimumBlockVariance: Double, similarityThreshold: Double, minimumBlockDistance: Int) {
+        /// Whether the rotation/scale-tolerant feature-matching pass runs
+        /// after block matching (see `FeatureCloneDetector`). Block matching
+        /// only catches a patch pasted back unmodified; this second pass
+        /// catches one that was rotated or rescaled first, at extra cost.
+        public var featureMatchingEnabled: Bool
+
+        /// Fewest distinct keypoint matches that must agree on a single
+        /// geometric transform before the feature-matching pass reports a
+        /// clone. An image with fewer than twice this many keypoints can't
+        /// produce a clone at all. Higher is stricter: fewer coincidental
+        /// detections on repetitive texture, but small clones (with few
+        /// keypoints of their own) slip through. Clamped to at least 3.
+        public var minimumMatchedKeypoints: Int
+
+        /// RANSAC inlier threshold, in pixels: how far a matched keypoint
+        /// may land from where the fitted transform predicts and still count
+        /// as agreeing with it.
+        public var ransacReprojectionThreshold: Double
+
+        /// Cap on keypoints extracted per image by the feature-matching
+        /// pass. Matching is quadratic in this number; more keypoints find
+        /// smaller clones in larger images.
+        public var maximumKeypoints: Int
+
+        public init(
+            enabled: Bool,
+            blockSize: Int,
+            blockStride: Int,
+            minimumBlockVariance: Double,
+            similarityThreshold: Double,
+            minimumBlockDistance: Int,
+            featureMatchingEnabled: Bool = true,
+            minimumMatchedKeypoints: Int = 12,
+            ransacReprojectionThreshold: Double = 3,
+            maximumKeypoints: Int = 2000
+        ) {
             self.enabled = enabled
             self.blockSize = blockSize
             self.blockStride = blockStride
             self.minimumBlockVariance = minimumBlockVariance
             self.similarityThreshold = similarityThreshold
             self.minimumBlockDistance = minimumBlockDistance
+            self.featureMatchingEnabled = featureMatchingEnabled
+            self.minimumMatchedKeypoints = minimumMatchedKeypoints
+            self.ransacReprojectionThreshold = ransacReprojectionThreshold
+            self.maximumKeypoints = maximumKeypoints
         }
     }
 
@@ -264,7 +304,11 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
             blockStride: 8,
             minimumBlockVariance: 20,
             similarityThreshold: 6,
-            minimumBlockDistance: 24
+            minimumBlockDistance: 24,
+            featureMatchingEnabled: true,
+            minimumMatchedKeypoints: 12,
+            ransacReprojectionThreshold: 3,
+            maximumKeypoints: 2000
         ),
         doubleCompression: DoubleCompressionConfig(
             enabled: true,

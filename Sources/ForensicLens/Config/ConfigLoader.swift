@@ -172,6 +172,14 @@ public enum ConfigLoader {
             clone.similarityThreshold = try parseDouble(key: key, value: value)
         case "minimumBlockDistance":
             clone.minimumBlockDistance = try parseInt(key: key, value: value)
+        case "featureMatchingEnabled":
+            clone.featureMatchingEnabled = try parseBool(key: key, value: value)
+        case "minimumMatchedKeypoints":
+            clone.minimumMatchedKeypoints = try parseInt(key: key, value: value)
+        case "ransacReprojectionThreshold":
+            clone.ransacReprojectionThreshold = try parseDouble(key: key, value: value)
+        case "maximumKeypoints":
+            clone.maximumKeypoints = try parseInt(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "cloneDetection", key: key)
         }

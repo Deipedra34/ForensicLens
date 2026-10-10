@@ -1,3 +1,4 @@
+import Foundation
 import ForensicLens
 import ImageDecoding
 
@@ -60,6 +61,128 @@ enum Fixtures {
             }
         }
         return try PixelBuffer(width: buffer.width, height: buffer.height, channels: buffer.channels, pixels: pixels)
+    }
+
+    /// A grayscale, photo-like texture: `noiseBuffer` blurred into blobs a
+    /// few pixels across, then contrast-stretched around mid-gray.
+    ///
+    /// Raw per-pixel noise has no structure that survives being rotated or
+    /// resampled -- every pixel is independent of its neighbors -- so it's
+    /// useless for exercising rotation/scale-tolerant feature matching. A
+    /// blurred version has real corners and blobs, like photographed
+    /// texture (foliage, gravel, fabric), that stay recognizable after a
+    /// rotate-and-rescale, while still never repeating itself anywhere.
+    static func smoothTextureBuffer(width: Int, height: Int, seed: UInt64 = 7) throws -> PixelBuffer {
+        let noise = try noiseBuffer(width: width, height: height, channels: 1, seed: seed)
+        var values = noise.pixels.map(Double.init)
+        for _ in 0..<2 {
+            values = boxBlurred(values, width: width, height: height, radius: 2)
+        }
+
+        let mean = values.reduce(0, +) / Double(values.count)
+        let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)
+        let gain = 45 / max(variance.squareRoot(), 1e-9)
+        let pixels = values.map { UInt8(clamping: Int((128 + ($0 - mean) * gain).rounded())) }
+        return try PixelBuffer(width: width, height: height, channels: 1, pixels: pixels)
+    }
+
+    private static func boxBlurred(_ values: [Double], width: Int, height: Int, radius: Int) -> [Double] {
+        var horizontal = [Double](repeating: 0, count: values.count)
+        for y in 0..<height {
+            for x in 0..<width {
+                var sum = 0.0
+                for dx in -radius...radius {
+                    sum += values[y * width + min(width - 1, max(0, x + dx))]
+                }
+                horizontal[y * width + x] = sum / Double(2 * radius + 1)
+            }
+        }
+        var output = [Double](repeating: 0, count: values.count)
+        for y in 0..<height {
+            for x in 0..<width {
+                var sum = 0.0
+                for dy in -radius...radius {
+                    sum += horizontal[min(height - 1, max(0, y + dy)) * width + x]
+                }
+                output[y * width + x] = sum / Double(2 * radius + 1)
+            }
+        }
+        return output
+    }
+
+    /// Returns a copy of `buffer` with the `size` x `size` patch at `src`
+    /// rotated by `rotationDegrees` (clockwise on screen) and scaled by
+    /// `scale` about its own center, then pasted centered on
+    /// `destinationCenter` -- a synthetic copy-move forgery of the kind a
+    /// forger makes by transforming the copied patch before pasting it, so
+    /// it can't be found by comparing blocks pixel-for-pixel. Pixels are
+    /// resampled bilinearly, as an image editor would.
+    ///
+    /// Also returns the axis-aligned bounding box of the pasted (rotated)
+    /// patch, as ground truth for where a detector should point.
+    static func pastingTransformedPatch(
+        of size: Int,
+        from src: (x: Int, y: Int),
+        centeredOn destinationCenter: (x: Double, y: Double),
+        rotationDegrees: Double,
+        scale: Double,
+        into buffer: PixelBuffer
+    ) throws -> (buffer: PixelBuffer, pastedBounds: Region) {
+        let theta = rotationDegrees * Double.pi / 180
+        let cosine = cos(theta)
+        let sine = sin(theta)
+        let sourceCenterX = Double(src.x) + Double(size) / 2
+        let sourceCenterY = Double(src.y) + Double(size) / 2
+
+        var cornersX: [Double] = []
+        var cornersY: [Double] = []
+        for (cx, cy) in [(0.0, 0.0), (Double(size), 0.0), (0.0, Double(size)), (Double(size), Double(size))] {
+            let dx = Double(src.x) + cx - sourceCenterX
+            let dy = Double(src.y) + cy - sourceCenterY
+            cornersX.append(destinationCenter.x + scale * (cosine * dx - sine * dy))
+            cornersY.append(destinationCenter.y + scale * (sine * dx + cosine * dy))
+        }
+        let x0 = max(0, Int((cornersX.min() ?? 0).rounded(.down)))
+        let x1 = min(buffer.width, Int((cornersX.max() ?? 0).rounded(.up)))
+        let y0 = max(0, Int((cornersY.min() ?? 0).rounded(.down)))
+        let y1 = min(buffer.height, Int((cornersY.max() ?? 0).rounded(.up)))
+
+        func sample(_ x: Int, _ y: Int, _ channel: Int) -> Double {
+            let cx = min(buffer.width - 1, max(0, x))
+            let cy = min(buffer.height - 1, max(0, y))
+            return Double(buffer.pixels[buffer.offset(x: cx, y: cy) + channel])
+        }
+
+        var pixels = buffer.pixels
+        for y in y0..<max(y0, y1) {
+            for x in x0..<max(x0, x1) {
+                // Inverse-map this destination pixel's center into the
+                // source patch; skip it if it lands outside the patch.
+                let dx = Double(x) + 0.5 - destinationCenter.x
+                let dy = Double(y) + 0.5 - destinationCenter.y
+                let sx = sourceCenterX + (cosine * dx + sine * dy) / scale
+                let sy = sourceCenterY + (-sine * dx + cosine * dy) / scale
+                guard sx >= Double(src.x), sx < Double(src.x + size), sy >= Double(src.y), sy < Double(src.y + size) else { continue }
+
+                let fx = sx - 0.5
+                let fy = sy - 0.5
+                let ix = Int(fx.rounded(.down))
+                let iy = Int(fy.rounded(.down))
+                let ax = fx - Double(ix)
+                let ay = fy - Double(iy)
+                let offset = buffer.offset(x: x, y: y)
+                for channel in 0..<buffer.channels {
+                    let value = sample(ix, iy, channel) * (1 - ax) * (1 - ay)
+                        + sample(ix + 1, iy, channel) * ax * (1 - ay)
+                        + sample(ix, iy + 1, channel) * (1 - ax) * ay
+                        + sample(ix + 1, iy + 1, channel) * ax * ay
+                    pixels[offset + channel] = UInt8(clamping: Int(value.rounded()))
+                }
+            }
+        }
+
+        let transformed = try PixelBuffer(width: buffer.width, height: buffer.height, channels: buffer.channels, pixels: pixels)
+        return (transformed, Region(x: x0, y: y0, width: max(0, x1 - x0), height: max(0, y1 - y0)))
     }
 
     /// Returns a copy of `buffer` with a `size` x `size` block of noise

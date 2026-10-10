@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 import ForensicLens
 
@@ -116,6 +117,56 @@ final class ConfigTests: XCTestCase {
 
         XCTAssertEqual(config.ela.elaQualityLevels, [60])
         XCTAssertEqual(config.ela.errorThreshold, 20)
+    }
+
+    func testParsingFeatureMatchingKeysUnderCloneDetection() throws {
+        let yaml = """
+        cloneDetection:
+          featureMatchingEnabled: false
+          minimumMatchedKeypoints: 20
+          ransacReprojectionThreshold: 2.5
+          maximumKeypoints: 800
+        """
+        let config = try ConfigLoader.parse(yaml)
+
+        XCTAssertFalse(config.cloneDetection.featureMatchingEnabled)
+        XCTAssertEqual(config.cloneDetection.minimumMatchedKeypoints, 20)
+        XCTAssertEqual(config.cloneDetection.ransacReprojectionThreshold, 2.5)
+        XCTAssertEqual(config.cloneDetection.maximumKeypoints, 800)
+        // Block-matching settings in the same section are untouched.
+        XCTAssertEqual(config.cloneDetection.blockSize, ForensicLensConfig.default.cloneDetection.blockSize)
+        XCTAssertTrue(config.cloneDetection.enabled)
+    }
+
+    func testFeatureMatchingIsOnByDefaultWithSaneThresholds() {
+        let clone = ForensicLensConfig.default.cloneDetection
+        XCTAssertTrue(clone.featureMatchingEnabled)
+        XCTAssertGreaterThanOrEqual(clone.minimumMatchedKeypoints, 3)
+        XCTAssertGreaterThan(clone.ransacReprojectionThreshold, 0)
+        XCTAssertGreaterThan(clone.maximumKeypoints, 2 * clone.minimumMatchedKeypoints)
+    }
+
+    func testShippedConfigFileMatchesBuiltInDefaults() throws {
+        // forensiclens.yaml documents every default; it should never drift
+        // from the values the code actually falls back to.
+        let path = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("forensiclens.yaml")
+            .path
+        let config = try ConfigLoader.load(contentsOfFile: path)
+        XCTAssertEqual(config.cloneDetection, ForensicLensConfig.default.cloneDetection)
+    }
+
+    func testInvalidFeatureMatchingValueThrows() {
+        let yaml = """
+        cloneDetection:
+          ransacReprojectionThreshold: wide
+        """
+        XCTAssertThrowsError(try ConfigLoader.parse(yaml)) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "ransacReprojectionThreshold", value: "wide"))
+        }
     }
 
     func testDefaultConfigIsInternallyConsistent() {
