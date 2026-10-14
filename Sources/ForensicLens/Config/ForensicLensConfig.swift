@@ -202,6 +202,57 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         }
     }
 
+    /// Settings for `PRNUAnalyzer`.
+    public struct PRNUConfig: Codable, Equatable, Sendable {
+        /// Whether PRNU sensor-noise analysis runs as part of a combined
+        /// report.
+        public var enabled: Bool
+
+        /// Side length, in working-resolution pixels, of each block whose
+        /// noise is compared against the rest of the image. Larger blocks
+        /// give a steadier noise estimate but localize less precisely.
+        /// Below about 64px the estimate gets noisy enough to flag honest
+        /// texture. Values under 16 are raised to 16.
+        public var blockSize: Int
+
+        /// A block whose noise-consistency score (0...1, see
+        /// `PRNUCorrelation.blockConsistency`) falls below this is flagged.
+        /// Higher is more sensitive and more prone to false positives on
+        /// heavily textured regions.
+        public var correlationThreshold: Double
+
+        /// Working-resolution cap: an image whose larger side exceeds this
+        /// is box-downsampled by an integer factor for the local check, and
+        /// center-cropped to it at native resolution for reference
+        /// verification. Bounds time and memory; see `PRNUAnalyzer`'s doc
+        /// comment for the trade-off. Values under 64 are raised to 64.
+        public var maximumWorkingDimension: Int
+
+        /// Optional folder of reference images from one camera to build a
+        /// fingerprint from (`--reference` on the CLI overrides it). `nil`
+        /// skips camera verification. Resolved by the CLI and evaluation
+        /// tools; a library caller passes the loaded fingerprint to
+        /// `ForensicLensEngine(config:prnuReference:)` itself.
+        public var referenceFolder: String?
+
+        public init(enabled: Bool, blockSize: Int, correlationThreshold: Double, maximumWorkingDimension: Int, referenceFolder: String? = nil) {
+            self.enabled = enabled
+            self.blockSize = blockSize
+            self.correlationThreshold = correlationThreshold
+            self.maximumWorkingDimension = maximumWorkingDimension
+            self.referenceFolder = referenceFolder
+        }
+
+        /// Standalone defaults, for the same reason as `TilingConfig.default`.
+        public static let `default` = PRNUConfig(
+            enabled: true,
+            blockSize: 64,
+            correlationThreshold: 0.5,
+            maximumWorkingDimension: 2048,
+            referenceFolder: nil
+        )
+    }
+
     /// Settings for the tiling layer (see `Sources/ForensicLens/Tiling`)
     /// that splits a large image into overlapping tiles before handing it
     /// to the analyzers above, rather than processing the whole decoded
@@ -269,13 +320,15 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public var cloneDetection: CloneDetectionConfig
     public var doubleCompression: DoubleCompressionConfig
     public var tiling: TilingConfig
+    public var prnu: PRNUConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
         self.doubleCompression = doubleCompression
         self.tiling = tiling
+        self.prnu = prnu
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -316,6 +369,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
             acCoefficientColumn: 1,
             periodicityThreshold: 0.24
         ),
-        tiling: TilingConfig.default
+        tiling: TilingConfig.default,
+        prnu: PRNUConfig.default
     )
 }

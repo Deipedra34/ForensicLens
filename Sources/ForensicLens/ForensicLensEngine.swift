@@ -15,11 +15,18 @@ public struct ForensicLensEngine: Sendable {
 
     /// Creates an engine with the given config and the full set of built-in
     /// analyzers (ELA, metadata, clone detection, double-compression
-    /// detection). Individual analyzers are still subject to their
-    /// `enabled` flag in `config` at run time.
-    public init(config: ForensicLensConfig = .default) {
+    /// detection, PRNU sensor-noise analysis). Individual analyzers are
+    /// still subject to their `enabled` flag in `config` at run time.
+    ///
+    /// - Parameter prnuReference: A camera fingerprint for PRNU reference
+    ///   verification, typically from
+    ///   `PRNUReferenceFingerprint.loadIfConfigured(config.prnu)`. Built
+    ///   once and shared by every image this engine analyzes, since
+    ///   building it means processing every reference image. `nil` runs
+    ///   PRNU analysis's single-image consistency check only.
+    public init(config: ForensicLensConfig = .default, prnuReference: PRNUReferenceFingerprint? = nil) {
         self.config = config
-        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer()]
+        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(reference: prnuReference)]
     }
 
     /// Runs every enabled analyzer against `image` and combines the results
@@ -72,6 +79,7 @@ public struct ForensicLensEngine: Sendable {
         case "metadata": return config.metadata.enabled
         case "clone": return config.cloneDetection.enabled
         case "doublecompression": return config.doubleCompression.enabled
+        case "prnu": return config.prnu.enabled
         default: return true
         }
     }

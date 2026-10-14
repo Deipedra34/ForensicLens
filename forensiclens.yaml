@@ -165,3 +165,39 @@ tiling:
   # spurious recompression error that has nothing to do with the image
   # itself.
   tileOverlap: 64
+
+prnu:
+  # Whether PRNU (photo response non-uniformity) sensor-noise analysis runs
+  # as part of a combined report. It denoises the image with a wavelet
+  # filter, keeps the noise residual, and flags blocks whose noise strength
+  # or correlation structure doesn't match the rest of the image -- a sign
+  # of a region spliced in from another source, or smoothed, resampled, or
+  # synthesized. One of the more expensive analyzers; see
+  # maximumWorkingDimension.
+  enabled: true
+
+  # Side length, in working-resolution pixels, of each block compared
+  # against the rest of the image. Larger is steadier but localizes less
+  # precisely; below ~64 the noise estimate gets noisy enough to flag honest
+  # texture. Minimum 16.
+  blockSize: 64
+
+  # A block whose noise-consistency score (0-1) falls below this is
+  # flagged. Higher is more sensitive, and more prone to false positives on
+  # heavily textured areas.
+  correlationThreshold: 0.5
+
+  # Working-resolution cap, in pixels. An image whose larger side exceeds
+  # it is box-downsampled by an integer factor for the consistency check
+  # (faster and lighter, but it averages away some of the noise being
+  # measured), and center-cropped to it at native resolution for reference
+  # verification (downsampling would destroy the per-pixel fingerprint).
+  # Minimum 64.
+  maximumWorkingDimension: 2048
+
+  # Optional folder of reference images known to come from one camera.
+  # When set (or when --reference is passed), a PRNU fingerprint is averaged
+  # from them and every analyzed image is checked against it. Needs several
+  # unedited, full-resolution, same-orientation shots -- 10 or more for a
+  # confident result -- and only images of that same size can be checked.
+  # referenceFolder: path/to/reference-images

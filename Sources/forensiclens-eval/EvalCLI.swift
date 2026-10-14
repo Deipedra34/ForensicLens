@@ -164,7 +164,10 @@ enum EvalCLI {
         let layout = try DatasetLoader.detectLayout(at: options.datasetPath)
         let dataset = try DatasetLoader.load(layout, extensions: options.extensions)
 
-        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config))
+        // A `referenceFolder` under `prnu` in the config adds PRNU camera
+        // verification to every image; built once for the whole run.
+        let prnuReference = try PRNUReferenceFingerprint.loadIfConfigured(config.prnu)
+        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config, prnuReference: prnuReference))
         let run = await Evaluator.run(
             dataset: dataset,
             analyzer: analyzer,

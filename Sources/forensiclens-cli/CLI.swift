@@ -50,22 +50,24 @@ enum CLI {
         }
 
         do {
-            let config = try applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath))
-            let rawBytes = try readFile(imagePath)
-            let image = try ImageData.load(rawBytes)
-            let engine = ForensicLensEngine(config: config)
+            let config = try applyingReferenceOption(parsed, to: applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath)))
 
             let only: Set<String>?
             switch command {
             case "report":
                 only = nil
-            case "ela", "metadata", "clone", "doublecompression":
+            case "ela", "metadata", "clone", "doublecompression", "prnu":
                 only = [command]
             default:
                 eprint("Error: unknown command \"\(command)\".")
                 printUsage()
                 return 1
             }
+
+            let rawBytes = try readFile(imagePath)
+            let image = try ImageData.load(rawBytes)
+            let prnuReference = try loadPRNUReference(for: config, running: only)
+            let engine = ForensicLensEngine(config: config, prnuReference: prnuReference)
 
             let report = engine.run(on: image, only: only, tiling: tilingOverride)
             if jsonOutput {
@@ -157,7 +159,7 @@ enum CLI {
 
         let config: ForensicLensConfig
         do {
-            config = try applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath))
+            config = try applyingReferenceOption(parsed, to: applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath)))
         } catch {
             eprint("Error: \(error)")
             return 1
@@ -199,7 +201,17 @@ enum CLI {
             htmlReports = BatchHTMLReportOptions(directory: htmlReportDirectory, threshold: htmlReportThreshold, sourceRoot: sourceRoot, files: files)
         }
 
-        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config), tiling: tilingOverride, htmlReports: htmlReports)
+        // Built once, before any image is analyzed, and shared by every
+        // concurrent analysis in the batch.
+        let prnuReference: PRNUReferenceFingerprint?
+        do {
+            prnuReference = try loadPRNUReference(for: config, running: nil)
+        } catch {
+            eprint("Error: \(error)")
+            return 1
+        }
+
+        let analyzer = BatchFileAnalyzer(engine: ForensicLensEngine(config: config, prnuReference: prnuReference), tiling: tilingOverride, htmlReports: htmlReports)
         let results = await BatchRunner.run(files: files, analyzer: analyzer, maxConcurrency: maxConcurrency, onFileComplete: BatchRunner.logProgressToStandardError)
 
         if let htmlReports {
@@ -277,6 +289,34 @@ enum CLI {
         var updated = config
         updated.cloneDetection.featureMatchingEnabled = false
         return updated
+    }
+
+    /// Applies `--reference <folder>` on top of the loaded config: sets the
+    /// folder PRNU analysis builds its camera fingerprint from, overriding
+    /// `referenceFolder` under `prnu` in forensiclens.yaml. Giving it while
+    /// PRNU analysis is disabled is an error, not a silently ignored flag.
+    /// Not `private`, so `ForensicLensTests` can exercise it directly.
+    static func applyingReferenceOption(_ parsed: ParsedArguments, to config: ForensicLensConfig) throws -> ForensicLensConfig {
+        guard let folder = try pathOption("--reference", in: parsed) else { return config }
+        guard config.prnu.enabled else { throw CLIError.referenceWithPRNUDisabled }
+        var updated = config
+        updated.prnu.referenceFolder = folder
+        return updated
+    }
+
+    /// Builds the PRNU reference fingerprint `config` names, if there is
+    /// one and PRNU analysis is among the analyzers this run uses (`only`,
+    /// with `nil` meaning all of them). Building it processes every
+    /// reference image, so it's done once per run, never per analyzed image.
+    static func loadPRNUReference(for config: ForensicLensConfig, running only: Set<String>?) throws -> PRNUReferenceFingerprint? {
+        if let only, !only.contains("prnu") { return nil }
+        guard let fingerprint = try PRNUReferenceFingerprint.loadIfConfigured(config.prnu) else { return nil }
+        let lowConfidence = fingerprint.imageCount < PRNUReferenceFingerprint.recommendedImageCount
+            ? " (fewer than \(PRNUReferenceFingerprint.recommendedImageCount): low confidence)"
+            : ""
+        // stderr, so `--json` output on stdout stays pipeable.
+        eprint("PRNU reference fingerprint built from \(fingerprint.imageCount) image(s)\(lowConfidence).")
+        return fingerprint
     }
 
     /// Builds a `TilingOverride` from `--tile-size <n>` / `--no-tiling`,
@@ -420,10 +460,11 @@ enum CLI {
           metadata            Run only EXIF/metadata analysis.
           clone               Run only copy-move (clone) detection.
           doublecompression   Run only double JPEG compression detection.
+          prnu                Run only PRNU sensor-noise analysis.
           batch               Scan directories and/or image files and print one summary report.
           help                Show this message.
 
-        OPTIONS (report / ela / metadata / clone / doublecompression):
+        OPTIONS (report / ela / metadata / clone / doublecompression / prnu):
           --json           Print the report as JSON instead of plain text.
           --html-report <path>
                            Also write a self-contained HTML report to <path>:
@@ -443,6 +484,12 @@ enum CLI {
                            Skip clone detection's rotation/scale-tolerant
                             feature-matching pass and run block matching
                             only (faster; misses rotated/rescaled clones).
+          --reference <folder>
+                           Build a PRNU fingerprint from the images in
+                            <folder> (several unedited, full-resolution
+                            shots from one camera; 10+ recommended) and
+                            check whether the image's sensor noise
+                            matches it. Overrides prnu.referenceFolder.
 
         OPTIONS (batch):
           --no-recursive        Only scan the top-level directory, skip subdirectories.
@@ -469,6 +516,8 @@ enum CLI {
           --tile-size <n>       Same as above, applied to every file in the batch.
           --no-tiling           Same as above, applied to every file in the batch.
           --no-feature-matching Same as above, applied to every file in the batch.
+          --reference <folder>  Same as above; the fingerprint is built once and
+                                 every file in the batch is checked against it.
 
         EXAMPLES:
           forensiclens-cli report photo.bmp
@@ -478,6 +527,8 @@ enum CLI {
           forensiclens-cli report large-photo.bmp --tile-size 512
           forensiclens-cli report large-photo.bmp --no-tiling
           forensiclens-cli clone photo.ppm --no-feature-matching
+          forensiclens-cli prnu photo.ppm
+          forensiclens-cli prnu photo.ppm --reference camera-reference/
           forensiclens-cli batch photos/
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json
@@ -496,6 +547,7 @@ enum CLIError: Error, CustomStringConvertible {
     case invalidHTMLReportThreshold(String)
     case thresholdWithoutReportDirectory
     case invalidFailThreshold(String)
+    case referenceWithPRNUDisabled
 
     var description: String {
         switch self {
@@ -515,6 +567,8 @@ enum CLIError: Error, CustomStringConvertible {
             return "--tile-size must be a positive integer, got \"\(value)\"."
         case .conflictingTilingFlags:
             return "--tile-size and --no-tiling cannot be combined."
+        case .referenceWithPRNUDisabled:
+            return "--reference needs PRNU analysis, which is disabled (prnu.enabled is false in the config)."
         }
     }
 }

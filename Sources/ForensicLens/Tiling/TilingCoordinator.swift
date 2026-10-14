@@ -70,7 +70,12 @@ enum TilingCoordinator {
     /// Metadata always runs as a single block even when `tiles` is
     /// non-nil: it reads EXIF once from `image.rawBytes`, has no spatial
     /// component, and gains nothing from tiling -- see `MetadataAnalyzer`'s
-    /// doc comment. Clone detection is dispatched to `TiledCloneDetection`
+    /// doc comment. PRNU analysis also always runs as a single block: each
+    /// block's noise is compared against an image-wide aggregate (which
+    /// per-tile passes would fragment), reference verification has to line
+    /// the whole frame up with its fingerprint, and the analyzer already
+    /// bounds its own cost and memory with `maximumWorkingDimension` -- see
+    /// `PRNUAnalyzer`'s doc comment. Clone detection is dispatched to `TiledCloneDetection`
     /// instead of `SpatialTileMerger`, since its cross-tile correctness
     /// requirement (a source/copy pair split across two tiles must still
     /// be found) needs a global candidate index rather than independently
@@ -82,7 +87,7 @@ enum TilingCoordinator {
         }
 
         switch analyzer.identifier {
-        case "metadata":
+        case "metadata", "prnu":
             return try analyzer.analyze(image, config: config)
         case "clone":
             return try TiledCloneDetection.run(image: image, config: config)

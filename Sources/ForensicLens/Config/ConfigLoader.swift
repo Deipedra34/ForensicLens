@@ -113,6 +113,8 @@ public enum ConfigLoader {
             try applyDoubleCompression(key: key, value: value, to: &config.doubleCompression)
         case "tiling":
             try applyTiling(key: key, value: value, to: &config.tiling)
+        case "prnu":
+            try applyPRNU(key: key, value: value, to: &config.prnu)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -213,6 +215,35 @@ public enum ConfigLoader {
         default:
             throw ConfigError.unknownKey(section: "tiling", key: key)
         }
+    }
+
+    private static func applyPRNU(key: String, value: String, to prnu: inout ForensicLensConfig.PRNUConfig) throws {
+        switch key {
+        case "enabled":
+            prnu.enabled = try parseBool(key: key, value: value)
+        case "blockSize":
+            prnu.blockSize = try parseInt(key: key, value: value)
+        case "correlationThreshold":
+            prnu.correlationThreshold = try parseDouble(key: key, value: value)
+        case "maximumWorkingDimension":
+            prnu.maximumWorkingDimension = try parseInt(key: key, value: value)
+        case "referenceFolder":
+            prnu.referenceFolder = parseOptionalPath(value)
+        default:
+            throw ConfigError.unknownKey(section: "prnu", key: key)
+        }
+    }
+
+    /// A path value, with surrounding double quotes removed. An empty
+    /// value, `null`, or `~` (YAML's spellings of "nothing") means no path.
+    private static func parseOptionalPath(_ value: String) -> String? {
+        var path = value.trimmingWhitespace()
+        if path.count >= 2, path.hasPrefix("\""), path.hasSuffix("\"") {
+            path.removeFirst()
+            path.removeLast()
+        }
+        guard !path.isEmpty, path != "null", path != "~" else { return nil }
+        return path
     }
 
     private static func parseBool(key: String, value: String) throws -> Bool {

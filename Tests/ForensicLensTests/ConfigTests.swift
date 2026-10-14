@@ -262,4 +262,50 @@ final class ConfigTests: XCTestCase {
     func testDefaultTileOverlapIsAMultipleOfEight() {
         XCTAssertEqual(ForensicLensConfig.default.tiling.tileOverlap % 8, 0)
     }
+
+    // MARK: - PRNU
+
+    func testPRNUIsOnByDefaultWithoutAReferenceFolder() {
+        let prnu = ForensicLensConfig.default.prnu
+        XCTAssertTrue(prnu.enabled)
+        XCTAssertEqual(prnu.blockSize, 64)
+        XCTAssertEqual(prnu.correlationThreshold, 0.5)
+        XCTAssertEqual(prnu.maximumWorkingDimension, 2048)
+        XCTAssertNil(prnu.referenceFolder)
+    }
+
+    func testParsingFullPRNUSection() throws {
+        let yaml = """
+        prnu:
+          enabled: false
+          blockSize: 32
+          correlationThreshold: 0.4
+          maximumWorkingDimension: 1024
+          referenceFolder: "camera refs/canon"
+        """
+        let config = try ConfigLoader.parse(yaml)
+
+        XCTAssertEqual(config.prnu.enabled, false)
+        XCTAssertEqual(config.prnu.blockSize, 32)
+        XCTAssertEqual(config.prnu.correlationThreshold, 0.4)
+        XCTAssertEqual(config.prnu.maximumWorkingDimension, 1024)
+        XCTAssertEqual(config.prnu.referenceFolder, "camera refs/canon")
+        XCTAssertEqual(config.tiling, ForensicLensConfig.default.tiling, "other sections keep their defaults")
+    }
+
+    func testPRNUReferenceFolderAcceptsUnquotedPathsAndExplicitNothing() throws {
+        XCTAssertEqual(try ConfigLoader.parse("prnu:\n  referenceFolder: C:/refs/camera-a").prnu.referenceFolder, "C:/refs/camera-a")
+        for empty in ["", "null", "~", "\"\""] {
+            XCTAssertNil(try ConfigLoader.parse("prnu:\n  referenceFolder: \(empty)").prnu.referenceFolder, "\"\(empty)\" means no folder")
+        }
+    }
+
+    func testPRNUInvalidValueAndUnknownKeyThrow() {
+        XCTAssertThrowsError(try ConfigLoader.parse("prnu:\n  correlationThreshold: high")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "correlationThreshold", value: "high"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("prnu:\n  waveletLevels: 5")) { error in
+            XCTAssertEqual(error as? ConfigError, .unknownKey(section: "prnu", key: "waveletLevels"))
+        }
+    }
 }

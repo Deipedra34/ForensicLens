@@ -11,11 +11,11 @@
 
 # ForensicLens
 
-A Swift library and CLI for spotting signs of digital manipulation in still images. It runs four independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, and double JPEG compression detection) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
+A Swift library and CLI for spotting signs of digital manipulation in still images. It runs five independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, double JPEG compression detection, and PRNU sensor-noise analysis) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
 
 Pure Swift and C, no Apple-only frameworks. Builds and tests on macOS and Linux.
 
-## Why four techniques instead of one
+## Why five techniques instead of one
 
 None of these methods are conclusive on their own, and each one is blind to a different kind of edit.
 
@@ -23,8 +23,9 @@ None of these methods are conclusive on their own, and each one is blind to a di
 - **Metadata analysis** catches evidence left behind by an editing tool or an impossible timestamp, but a careful edit that strips or fakes EXIF just sails right through it.
 - **Clone detection** catches duplicated regions no matter what the compression history looks like -- including a copied patch that was rotated or rescaled before being pasted back -- but it's blind to edits that don't involve copying part of the same image.
 - **Double compression detection** catches whether the file was JPEG-compressed *twice* -- the fingerprint left by opening an already-compressed photo, editing it, and saving it again -- even when the edit itself was a clean, precisely-aligned copy-move that leaves ELA and clone detection with nothing unusual to see. It has nothing to say about a first-generation, once-compressed original, edited or not.
+- **PRNU sensor-noise analysis** catches a region whose sensor noise doesn't match the rest of the frame: a patch spliced in from another photo, or one that was smoothed, resampled, or generated. Given reference images from a camera, it can also check whether the photo carries that camera's sensor fingerprint at all. It works on uncompressed or lightly compressed images near native resolution, and has little to say about heavily recompressed, resized, or social-media copies.
 
-Run all four and combine the results, and you catch a wider range of edits than any single technique would on its own. That's the whole point of `SuspicionScorer`.
+Run all five and combine the results, and you catch a wider range of edits than any single technique would on its own. That's the whole point of `SuspicionScorer`.
 
 ## Architecture
 
@@ -49,6 +50,7 @@ flowchart TB
         Meta[MetadataAnalyzer]
         Clone[CloneDetectionAnalyzer]
         DoubleComp[DoubleCompressionAnalyzer]
+        PRNU[PRNUAnalyzer]
         Scorer[SuspicionScorer]
         Config[ForensicLensConfig]
     end
@@ -69,18 +71,22 @@ flowchart TB
     ImageData --> Meta
     ImageData --> Clone
     ImageData --> DoubleComp
+    ImageData --> PRNU
     Analyzer -.conforms.-> ELA
     Analyzer -.conforms.-> Meta
     Analyzer -.conforms.-> Clone
     Analyzer -.conforms.-> DoubleComp
+    Analyzer -.conforms.-> PRNU
     Config --> ELA
     Config --> Meta
     Config --> Clone
     Config --> DoubleComp
+    Config --> PRNU
     ELA --> Scorer
     Meta --> Scorer
     Clone --> Scorer
     DoubleComp --> Scorer
+    PRNU --> Scorer
     Scorer --> Report
     Report --> HTML
     ImageData --> HTML
@@ -88,7 +94,7 @@ flowchart TB
 
 The rule that keeps this modular: **`CStbImage` is the only place C code lives, and `ImageDecoding` is the only module allowed to import it.** Everything above `ImageDecoding` (every analyzer, the scorer, the CLI) works exclusively with the plain-Swift `PixelBuffer` / `ImageData` types and never sees a C pointer. Swapping in a real JPEG decoder later, or adding PNG support, means touching `ImageDecoding` and nothing else.
 
-Analyzers themselves are pluggable through the `Analyzer` protocol. `ForensicLensEngine` doesn't know about `ELAAnalyzer` or `CloneDetectionAnalyzer` by name; it just runs whatever's in its analyzer list and enabled in config. Adding a fourth analyzer later is just a matter of conforming to the protocol and registering it.
+Analyzers themselves are pluggable through the `Analyzer` protocol. `ForensicLensEngine` doesn't know about `ELAAnalyzer` or `CloneDetectionAnalyzer` by name; it just runs whatever's in its analyzer list and enabled in config. Adding another analyzer is just a matter of conforming to the protocol and registering it.
 
 Above a configurable size threshold, `ForensicLensEngine` routes an image through `Sources/ForensicLens/Tiling` before it ever reaches an analyzer: the tiling layer splits the decoded `PixelBuffer` into overlapping tiles, drives each analyzer's existing, unmodified `analyze` method per tile, and stitches the per-tile findings back into one report -- see "Tiled processing for large images" below. Every analyzer keeps operating on a single `ImageData`/`PixelBuffer`, exactly as the diagram above shows; tiling is an implementation detail of what gets handed to `ImageData`, not a change to the `Analyzer` contract itself.
 
@@ -100,6 +106,7 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 | EXIF / Metadata | Editing-software signatures, impossible or drifted timestamps, missing camera fields, cross-field inconsistencies (GPS vs. capture timestamp, GPS vs. camera identity, GPS altitude sign, editing software vs. unedited-camera claim) | No | Yes (JPEG only) |
 | Copy-Move (Clone) Detection | Duplicated regions pasted elsewhere in the same image: exact copies via block matching, plus rotated and/or rescaled copies via keypoint matching and RANSAC (reports the recovered rotation and scale) | Yes | No |
 | Double JPEG Compression Detection | A periodic pattern in a DCT coefficient's histogram, left behind when a JPEG is decompressed, edited, and re-compressed a second time | Yes (JPEG only) | No |
+| PRNU Sensor Noise Analysis | Blocks whose sensor-noise level or correlation structure doesn't match the rest of the image; optionally, whether the image carries a known camera's PRNU fingerprint (`--reference`) | Yes | No |
 
 | Capability | Status |
 |---|---|
@@ -119,7 +126,7 @@ Text and JSON reports say *what* was flagged; the HTML report shows *where*. `--
 
 - **Suspicion score** and verdict at the top, color-coded by severity.
 - **The analyzed image**, embedded directly in the page as a base64 `data:` URI (BMP and JPEG are embedded byte-for-byte; PPM/PGM, which browsers can't display, are converted to BMP from the already-decoded pixels).
-- **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- and purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from.
+- **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from, and green for PRNU sensor-noise analysis: one box per noise-inconsistent block, plus the analyzed area when an image fails a `--reference` camera check.
 - **A checkbox per analyzer** above the image to show or hide that layer (a few lines of inline JavaScript, no libraries), plus a legend mapping each color to its analyzer.
 - **The full findings breakdown** below the image: analyzer name, score, summary, and every indicator with its region coordinates -- the same information as the text/JSON report.
 
@@ -162,10 +169,11 @@ COMMANDS:
   metadata            Run only EXIF/metadata analysis.
   clone               Run only copy-move (clone) detection.
   doublecompression   Run only double JPEG compression detection.
+  prnu                Run only PRNU sensor-noise analysis.
   batch               Scan directories and/or image files and print one summary report.
   help                Show usage.
 
-OPTIONS (report / ela / metadata / clone / doublecompression):
+OPTIONS (report / ela / metadata / clone / doublecompression / prnu):
   --json           Print the report as JSON instead of plain text.
   --html-report <path>
                    Also write a self-contained HTML report to <path>:
@@ -185,6 +193,12 @@ OPTIONS (report / ela / metadata / clone / doublecompression):
                    Skip clone detection's rotation/scale-tolerant
                     feature-matching pass and run block matching
                     only (faster; misses rotated/rescaled clones).
+  --reference <folder>
+                   Build a PRNU fingerprint from the images in
+                    <folder> (several unedited, full-resolution
+                    shots from one camera; 10+ recommended) and
+                    check whether the image's sensor noise
+                    matches it. Overrides prnu.referenceFolder.
 
 OPTIONS (batch):
   --no-recursive        Only scan the top-level directory, skip subdirectories.
@@ -211,6 +225,8 @@ OPTIONS (batch):
   --tile-size <n>       Same as above, applied to every file in the batch.
   --no-tiling           Same as above, applied to every file in the batch.
   --no-feature-matching Same as above, applied to every file in the batch.
+  --reference <folder>  Same as above; the fingerprint is built once and
+                         every file in the batch is checked against it.
 ```
 
 Examples:
@@ -224,6 +240,10 @@ forensiclens-cli clone photo.ppm --json
 
 # Clone detection with block matching only (skips the rotation/scale-tolerant pass)
 forensiclens-cli clone photo.ppm --no-feature-matching
+
+# PRNU sensor-noise consistency only, then also against a known camera's fingerprint
+forensiclens-cli prnu photo.ppm
+forensiclens-cli prnu photo.ppm --reference camera-reference/
 
 # Custom thresholds
 forensiclens-cli report photo.bmp --config strict.yaml
@@ -362,6 +382,13 @@ tiling:
   tilingThreshold: 4096    # max(width, height) in px above which an image is tiled
   tileSize: 1024           # side length, in px, of each tile's core region
   tileOverlap: 64          # px of extra context on each side; must be a multiple of 8
+
+prnu:
+  enabled: true
+  blockSize: 64                  # px per compared block, at working resolution (min 16)
+  correlationThreshold: 0.5      # blocks with a noise-consistency score (0-1) below this are flagged
+  maximumWorkingDimension: 2048  # larger images: downsampled for the local check, center-cropped for --reference
+  # referenceFolder: path/to/reference-images   # same-camera images for fingerprint verification (or --reference)
 ```
 
 ## Per-analyzer implementation notes
@@ -378,6 +405,53 @@ Deeper trade-off discussion lives in [`docs/algorithms.md`](docs/algorithms.md) 
   - **Limitations.** Keypoint descriptors need room. A cloned region smaller than roughly 40-50px across, at the source's scale, rarely has `minimumMatchedKeypoints` keypoints far enough inside it to describe without picking up the surrounding pasted-over pixels, so small clones are left to block matching (which handles them only if unrotated). Flat or very smooth regions have no corners to match. Mirrored (flipped) copies aren't detected, since BRIEF descriptors aren't mirror-invariant. Scale changes beyond about 3x either way, or heavy shear, are rejected as implausible. Like block matching, genuinely repetitive real-world texture (tiled floors, brick, window grids) can be self-similar under a consistent transform and produce false positives; raise `minimumMatchedKeypoints` if that's a problem. Cost: extraction is roughly linear in pixel count, plus a matching step quadratic in `maximumKeypoints` (each comparison is just four XOR-popcounts). That's usually far cheaper than block matching's quadratic block comparison on large images, but it's a real addition on small ones. Working memory is around 24 bytes per pixel at full resolution while extracting.
   - **Tiling.** On a tiled (large) image, both passes pool their evidence image-wide before matching rather than resetting per tile: block candidates and keypoints are each collected tile by tile into one global index, so a copy-move whose source and pasted copy fall in two different tiles is still caught. See "Tiled processing for large images" above.
 - **Double compression detection** looks for the classic double-JPEG-compression signature: it splits the decoded image into an 8x8 grid of luma blocks (JPEG's own block size), runs a forward DCT on each one, and builds a histogram of one chosen low-frequency AC coefficient (`(1,1)` by default) across every block. A JPEG compressed once quantizes that coefficient to multiples of a single step, which just thins the histogram out evenly. Compressing a *second* time at a different quality requantizes values that are already multiples of the first step to multiples of a second, generally different one -- and because the two steps don't line up, some of the final histogram's non-empty bins end up noticeably fatter or thinner than their neighbors, in a pattern that repeats with a period tied to the ratio between the two steps. This analyzer removes the histogram's broad, natural envelope (a small local moving average) and runs a discrete Fourier transform over what's left, purely to see whether one frequency's energy dominates -- a strong single peak means a periodic comb is present; a flat spectrum means the histogram never had one. Since a crop between the two compressions shifts JPEG's 8x8 block grid relative to the file's own pixel `(0, 0)`, it repeats this scan at several candidate pixel offsets and keeps whichever one shows the strongest periodicity. Being a JPEG-quantization-specific signal, it reports "not applicable" on any non-JPEG input rather than a false negative. See `DoubleCompressionAnalyzer` and `DCTPeriodicityAnalysis`'s doc comments for the full reasoning.
+- **PRNU sensor-noise analysis** has its own section below.
+
+## PRNU Analysis
+
+Every camera sensor's pixels differ very slightly in how strongly they respond to light. That *photo response non-uniformity* (PRNU) leaves a faint, fixed noise pattern on every photo the sensor takes. The pattern is unique to the sensor and survives ordinary handling. `PRNUAnalyzer` recovers it as the image's noise residual and uses it in two ways.
+
+**Residual extraction.** The luminance channel is denoised with the wavelet-domain, locally adaptive Wiener filter that is standard for PRNU work (Mihcak et al., as used by Lukas, Fridrich & Goljan). It's a 4-level orthonormal Daubechies (db4) decomposition. Each detail coefficient keeps `w * sigma0^2 / (s^2 + sigma0^2)` as residual, where `s^2` is the local signal variance (the smallest estimate over 3x3 to 9x9 windows) and `sigma0 = 3` gray levels. That keeps nearly all of a coefficient in flat areas and very little on edges. The residual (original minus denoised) is then zero-meaned row by row and column by column, which strips readout artifacts that sensors of the same model share. The transform is hand-written in Swift (`Sources/ForensicLens/Analyzers/PRNU`), with a unit test that it reconstructs its input exactly.
+
+### Mode 1: local consistency (single image, always on)
+
+The residual is cut into `blockSize` blocks (64px by default). Each block gets a *noise signature*: its residual level, and the correlation of its residual with itself at the 12 nearest spatial lags. That structure is set by the sensor, its color filter array, and the camera's demosaicing. Each block is compared against the image's own aggregate signature, the median over every *other* block, so neither the block itself nor a spliced region spanning several blocks pulls the reference toward itself. The comparison yields a consistency score from 0 to 1: one minus the worst lag-correlation disagreement, times the square root of the noise-level ratio. Blocks below `correlationThreshold` are flagged. They're reported as regions, in the same shape as clone detection's, and drawn in the HTML report. They feed `SuspicionScorer` like any other finding: up to 70 points for how many blocks are flagged (saturating at 5% of the analyzed blocks), plus up to 30 for how far below the threshold they fall.
+
+Why a noise *signature* rather than correlating each block's raw residual with the rest of the image: a PRNU pattern is different at every pixel, which is exactly what makes it a fingerprint. Nothing elsewhere in a single image says what one block's pattern should be, so a pixel-wise correlation between a block and the rest of the same frame would measure only chance. What one sensor does imprint uniformly is the noise's character, and that's what a splice from another source, or a smoothed, resampled, or synthesized region, changes. The flip side is that a region from a different camera whose noise is *statistically identical* can't be caught from the image alone. That's what reference mode is for.
+
+### Mode 2: reference fingerprint verification (optional)
+
+```sh
+forensiclens-cli prnu photo.ppm --reference camera-reference/
+forensiclens-cli report photo.ppm --reference camera-reference/
+forensiclens-cli batch photos/ --reference camera-reference/ --extensions bmp,ppm
+```
+
+`--reference` (or `referenceFolder` under `prnu` in `forensiclens.yaml`) names a folder of images known to come from one camera. Their residuals are averaged into a fingerprint with the standard maximum-likelihood estimator, `K = sum(W_i * I_i) / sum(I_i^2)`, skipping clipped pixels. The image under test is then correlated against `I * K`, and the result is reported as PCE (peak-to-correlation energy), the standard camera-matching statistic. PCE of 60 or more counts as a match, which supports a claim that the camera took the photo. Below 60 contradicts that claim: either a different camera took it, or it was resized, cropped, or heavily processed since capture. That scores 60 ("suspicious", not "likely manipulated", since an honest resize also fails). The fingerprint is built once per run and shared by every image in a batch.
+
+For this to mean anything:
+
+- **Use several reference images.** At least 2 are required and **10 or more are recommended**. With fewer, every result says "low confidence" and a mismatch's score is scaled down proportionally. Bright, smooth, in-focus shots (sky, walls) give the cleanest fingerprints.
+- **Use native, unedited captures.** References must be full-resolution, unrotated, uncropped shots straight from the camera, not files that went through ForensicLens's own conversions or any editor. They must all be the same size, or the run stops with an error naming the odd one out. Only images of that same size can be checked; any other size is reported as "skipped", never as a mismatch.
+- **Decodable formats only.** Files in the folder that aren't images are skipped. A JPEG (whose pixels this build can't decode yet) or another undecodable image stops the run with a clear error, rather than silently building a thinner fingerprint than the folder suggests. Convert references to BMP/PPM first, as for CASIA in [Evaluation](#evaluation).
+
+### Limitations
+
+- PRNU is **weak on heavily compressed, resized, or downloaded-from-social-media images**: recompression and resampling destroy most of the pattern. On such images, expect "consistent" results that mean little, and reference mismatches even for the right camera.
+- It needs **reasonably large blocks and image resolution**. Below about 64px a block's noise estimate gets noisy enough to flag honest texture. An image needs at least 4 blocks at working resolution to be assessed at all.
+- **Dark, clipped, and heavily textured areas** are unreliable: there's little sensor response to measure, or scene detail leaks into the residual. Blocks more than half clipped to black or white are skipped. Strong texture is the most likely source of false positives; raise `blockSize` or lower `correlationThreshold` if it's a problem.
+- An image with **no measurable noise at all** (synthetic, flat, heavily denoised) gets a low-confidence "not assessed" result with score 0, not a guess. The same goes for too few usable blocks.
+- Thresholds were tuned on synthetic sensor simulations (see Testing), not on a real-photo benchmark. Running `forensiclens-eval` on your own data is the way to calibrate them.
+
+### Performance
+
+This is one of the more expensive analyzers. Residual extraction costs roughly a few hundred floating-point operations per pixel (forward and inverse 8-tap wavelet transforms, and a four-window variance estimate in every subband). Working memory is a handful of `Double` planes the size of the working image. Both are bounded by `maximumWorkingDimension` (default 2048):
+
+- **Local consistency** box-downsamples a larger image by the smallest integer factor that fits (a 6000x4000 photo is analyzed at 2000x1333). That trades sensitivity for speed: averaging pixels averages away part of the noise being measured and blurs small inconsistent regions together. It attenuates noise uniformly across the frame, though, so block-to-block comparison keeps working. Raise the cap to analyze closer to native resolution, at quadratically growing cost.
+- **Reference verification** never downsamples, since that would erase the per-pixel pattern it matches. It center-crops to the cap at native resolution instead, which keeps plenty of pixels for PCE while bounding cost. PCE adds three 2D FFTs of the crop, zero-padded to a power of two. Building the fingerprint costs one residual extraction per reference image, once per run.
+- PRNU always runs as a single block, outside the tiling layer: blocks compare against an image-wide aggregate, which per-tile passes would fragment, and the working-resolution cap already bounds its cost. The [benchmark table](#benchmarking) includes it. Disable it with `enabled: false` under `prnu` when throughput matters more.
+
+**Why a hand-written FFT.** PCE needs the correlation at every relative shift, and only an FFT makes that practical (`O(N log N)` instead of quadratic). Accelerate's vDSP FFT is Apple-only, and FFTW would add a C system dependency to a package with none, so either would break the macOS-and-Linux, dependency-free build. `FFT.swift` is a plain iterative radix-2 Cooley-Tukey transform with its own unit tests, the same reasoning as clone detection's pure-Swift feature matching. It's slower than vDSP, but it runs only once per analyzed image, and only in reference mode.
 
 ## Image format support
 
@@ -412,7 +486,7 @@ The table below is generated by [`.github/workflows/benchmark.yml`](.github/work
 
 <!-- BENCHMARK-TABLE-END -->
 
-ELA scales roughly linearly with pixel count, since it's a fixed amount of work per 8x8 block -- multiplied by the number of quality levels in `elaQualityLevels` (3 by default), since it recompresses once per configured level. Dropping to fewer quality levels is the lever to pull if ELA itself is the bottleneck; the table above reflects the default three-level scan, so it runs roughly 3x what a single-quality scan would take. Clone detection scales worse: block matching compares every candidate block against every other candidate block, which is quadratic in block count. So a larger `blockSize` or `blockStride` in `forensiclens.yaml` is the lever to pull if it's too slow on large images. The clone timings include the rotation/scale-tolerant feature-matching pass, which adds keypoint extraction (roughly linear in pixel count) and keypoint matching (quadratic in `maximumKeypoints`, but with very cheap comparisons). `--no-feature-matching` drops back to block matching alone. Metadata analysis only reads a file's header, so its cost stays flat regardless of image size.
+ELA scales roughly linearly with pixel count, since it's a fixed amount of work per 8x8 block -- multiplied by the number of quality levels in `elaQualityLevels` (3 by default), since it recompresses once per configured level. Dropping to fewer quality levels is the lever to pull if ELA itself is the bottleneck; the table above reflects the default three-level scan, so it runs roughly 3x what a single-quality scan would take. Clone detection scales worse: block matching compares every candidate block against every other candidate block, which is quadratic in block count. So a larger `blockSize` or `blockStride` in `forensiclens.yaml` is the lever to pull if it's too slow on large images. The clone timings include the rotation/scale-tolerant feature-matching pass, which adds keypoint extraction (roughly linear in pixel count) and keypoint matching (quadratic in `maximumKeypoints`, but with very cheap comparisons). `--no-feature-matching` drops back to block matching alone. Metadata analysis only reads a file's header, so its cost stays flat regardless of image size. PRNU analysis scales linearly with pixel count up to `maximumWorkingDimension`, past which the image is downsampled to fit, so its cost levels off. At the default 64px block size, the 64x64 row holds a single block, below the four the check needs, so it only measures that size check. The larger rows run the full wavelet denoise and consistency pass. The table doesn't include reference verification (`--reference`), which adds FFTs on top.
 
 These sizes all sit well under the default `tilingThreshold` (4096px), so the table above reflects the untiled, single-block path every image this small already used before tiling existed. A genuinely "large" case -- large enough to trigger tiling automatically -- isn't in the automated table above: clone detection's quadratic block-comparison cost (see above) makes a multi-thousand-pixel image impractically slow for a CI benchmark run regardless of tiling, since tiling pools candidates globally rather than shrinking that comparison (a correctness requirement -- see "Tiled processing for large images"). Tiling exists to bound peak *memory* on a large image, not to reduce total analysis work, so it wouldn't materially change these numbers anyway for the analyzers it does apply to. To see tiling's effect on a specific large image of your own, compare `--tile-size <n>` against `--no-tiling` directly:
 
@@ -507,7 +581,7 @@ Unlike the benchmark table above, which `.github/workflows/benchmark.yml` regene
 swift test
 ```
 
-The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `RANSACAffineEstimatorTests.swift` covers geometric verification on its own, with no images: synthetic point correspondences generated from a known transform, mixed with planted outliers, must give back that transform's rotation, scale, and translation with every outlier rejected, even when outliers outnumber inliers. Random correspondences, too few correspondences, and collinear points must give no estimate rather than a bogus one. `FeatureCloneDetectionTests.swift` covers the rotation/scale-tolerant clone pass end to end. It pastes a patch of a synthetic texture back into the image after rotating it 30 or 90 degrees, scaling it 1.25x, or rotating 45 degrees while shrinking it to 0.8x. It then checks that the clone is found with the right rotation and scale, and that both reported regions overlap the known ground truth. It also checks that block matching alone misses the rotated copy, that authentic texture, pixel noise, flat images, and tiny images produce no clone (and no crash), and that a rotated clone split across tiles is still found when tiled. `FeatureMatchingCLITests.swift` covers the `--no-feature-matching` flag. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`. `EvaluationMetricsTests.swift` checks the precision/recall/F1/accuracy and threshold-sweep math against hand-worked confusion matrices, with no images involved, and `EvaluationToolTests.swift` covers `forensiclens-eval`'s dataset layouts and manifest parsing, its error messages for a malformed dataset, and an end-to-end run (single threshold and sweep, JSON and CSV output) over a handful of synthetic authentic and copy-move images written to a temporary directory, including a corrupt file that must be skipped rather than abort the run.
+The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `RANSACAffineEstimatorTests.swift` covers geometric verification on its own, with no images: synthetic point correspondences generated from a known transform, mixed with planted outliers, must give back that transform's rotation, scale, and translation with every outlier rejected, even when outliers outnumber inliers. Random correspondences, too few correspondences, and collinear points must give no estimate rather than a bogus one. `FeatureCloneDetectionTests.swift` covers the rotation/scale-tolerant clone pass end to end. It pastes a patch of a synthetic texture back into the image after rotating it 30 or 90 degrees, scaling it 1.25x, or rotating 45 degrees while shrinking it to 0.8x. It then checks that the clone is found with the right rotation and scale, and that both reported regions overlap the known ground truth. It also checks that block matching alone misses the rotated copy, that authentic texture, pixel noise, flat images, and tiny images produce no clone (and no crash), and that a rotated clone split across tiles is still found when tiled. `FeatureMatchingCLITests.swift` covers the `--no-feature-matching` flag. The PRNU tests simulate camera sensors (`PRNUFixtures.swift`): a fixed per-pixel gain pattern applied to smooth synthetic scenes, plus read noise. `PRNUMathTests.swift` checks the math on its own against exact or analytic answers: wavelet reconstruction and orthonormality, the Wiener shrinkage rule, FFT outputs and shift recovery, NCC values, lag-correlation signatures of checkerboard and stripe patterns, leave-one-out medians, the consistency formula, and PCE. `PRNUAnalyzerTests.swift` splices a block with no sensor noise, and one with spatially correlated noise, into a simulated capture and checks that exactly that block is flagged, including at reduced working resolution. It also checks that an untouched capture, a uniform image, a clipped image, and a too-small image produce no false finding. `PRNUReferenceTests.swift` builds a fingerprint from five captures of one simulated sensor and checks that a new capture from that sensor matches while one from a different sensor scores lower. It also covers every building error (too few images, mismatched sizes, noiseless references, undecodable or missing files) and `--reference` end to end. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`. `EvaluationMetricsTests.swift` checks the precision/recall/F1/accuracy and threshold-sweep math against hand-worked confusion matrices, with no images involved, and `EvaluationToolTests.swift` covers `forensiclens-eval`'s dataset layouts and manifest parsing, its error messages for a malformed dataset, and an end-to-end run (single threshold and sweep, JSON and CSV output) over a handful of synthetic authentic and copy-move images written to a temporary directory, including a corrupt file that must be skipped rather than abort the run.
 
 To generate the same coverage report as CI locally (Linux/macOS with the Swift toolchain's `llvm-cov`/`llvm-profdata`):
 
