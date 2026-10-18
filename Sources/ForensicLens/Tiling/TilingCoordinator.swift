@@ -75,7 +75,10 @@ enum TilingCoordinator {
     /// per-tile passes would fragment), reference verification has to line
     /// the whole frame up with its fingerprint, and the analyzer already
     /// bounds its own cost and memory with `maximumWorkingDimension` -- see
-    /// `PRNUAnalyzer`'s doc comment. Clone detection is dispatched to `TiledCloneDetection`
+    /// `PRNUAnalyzer`'s doc comment. CFA analysis runs as a single block for
+    /// the same image-wide-baseline reason: the recorded Bayer lattice phase
+    /// and typical trace strength are estimated across the whole image, and
+    /// it reads one block at a time anyway, so memory stays small. Clone detection is dispatched to `TiledCloneDetection`
     /// instead of `SpatialTileMerger`, since its cross-tile correctness
     /// requirement (a source/copy pair split across two tiles must still
     /// be found) needs a global candidate index rather than independently
@@ -87,7 +90,7 @@ enum TilingCoordinator {
         }
 
         switch analyzer.identifier {
-        case "metadata", "prnu":
+        case "metadata", "prnu", "cfa":
             return try analyzer.analyze(image, config: config)
         case "clone":
             return try TiledCloneDetection.run(image: image, config: config)

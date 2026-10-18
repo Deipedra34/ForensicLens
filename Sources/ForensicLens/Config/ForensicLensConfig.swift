@@ -253,6 +253,35 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         )
     }
 
+    /// Settings for `CFAAnalyzer`.
+    public struct CFAConfig: Codable, Equatable, Sendable {
+        /// Whether CFA demosaicing consistency analysis runs as part of a
+        /// combined report.
+        public var enabled: Bool
+
+        /// Side length, in pixels, of each block whose demosaicing trace is
+        /// compared against the rest of the image. Larger blocks give a
+        /// steadier estimate but localize less precisely. Raised to at
+        /// least 16 and rounded up to an even number, so every block starts
+        /// on the same Bayer lattice phase.
+        public var blockSize: Int
+
+        /// A block whose trace strength, relative to the image's typical
+        /// strength (about 1 for an ordinary block, about 0 with no
+        /// pattern, negative on a shifted lattice), falls below this is
+        /// flagged. Higher is more sensitive.
+        public var consistencyThreshold: Double
+
+        public init(enabled: Bool, blockSize: Int, consistencyThreshold: Double) {
+            self.enabled = enabled
+            self.blockSize = blockSize
+            self.consistencyThreshold = consistencyThreshold
+        }
+
+        /// Standalone defaults, for the same reason as `TilingConfig.default`.
+        public static let `default` = CFAConfig(enabled: true, blockSize: 64, consistencyThreshold: 0.3)
+    }
+
     /// Settings for the tiling layer (see `Sources/ForensicLens/Tiling`)
     /// that splits a large image into overlapping tiles before handing it
     /// to the analyzers above, rather than processing the whole decoded
@@ -321,14 +350,16 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public var doubleCompression: DoubleCompressionConfig
     public var tiling: TilingConfig
     public var prnu: PRNUConfig
+    public var cfa: CFAConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
         self.doubleCompression = doubleCompression
         self.tiling = tiling
         self.prnu = prnu
+        self.cfa = cfa
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -370,6 +401,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
             periodicityThreshold: 0.24
         ),
         tiling: TilingConfig.default,
-        prnu: PRNUConfig.default
+        prnu: PRNUConfig.default,
+        cfa: CFAConfig.default
     )
 }

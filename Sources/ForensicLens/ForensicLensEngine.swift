@@ -15,7 +15,8 @@ public struct ForensicLensEngine: Sendable {
 
     /// Creates an engine with the given config and the full set of built-in
     /// analyzers (ELA, metadata, clone detection, double-compression
-    /// detection, PRNU sensor-noise analysis). Individual analyzers are
+    /// detection, PRNU sensor-noise analysis, CFA demosaicing consistency).
+    /// Individual analyzers are
     /// still subject to their `enabled` flag in `config` at run time.
     ///
     /// - Parameter prnuReference: A camera fingerprint for PRNU reference
@@ -26,7 +27,7 @@ public struct ForensicLensEngine: Sendable {
     ///   PRNU analysis's single-image consistency check only.
     public init(config: ForensicLensConfig = .default, prnuReference: PRNUReferenceFingerprint? = nil) {
         self.config = config
-        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(reference: prnuReference)]
+        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(reference: prnuReference), CFAAnalyzer()]
     }
 
     /// Runs every enabled analyzer against `image` and combines the results
@@ -80,6 +81,7 @@ public struct ForensicLensEngine: Sendable {
         case "clone": return config.cloneDetection.enabled
         case "doublecompression": return config.doubleCompression.enabled
         case "prnu": return config.prnu.enabled
+        case "cfa": return config.cfa.enabled
         default: return true
         }
     }

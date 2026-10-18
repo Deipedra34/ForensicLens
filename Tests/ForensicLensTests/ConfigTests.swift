@@ -300,6 +300,36 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    // MARK: - CFA
+
+    func testCFAIsOnByDefault() {
+        let cfa = ForensicLensConfig.default.cfa
+        XCTAssertTrue(cfa.enabled)
+        XCTAssertEqual(cfa.blockSize, 64)
+        XCTAssertEqual(cfa.consistencyThreshold, 0.3)
+    }
+
+    func testParsingFullCFASection() throws {
+        let yaml = """
+        cfa:
+          enabled: false
+          blockSize: 32
+          consistencyThreshold: 0.45
+        """
+        let config = try ConfigLoader.parse(yaml)
+        XCTAssertEqual(config.cfa, ForensicLensConfig.CFAConfig(enabled: false, blockSize: 32, consistencyThreshold: 0.45))
+        XCTAssertEqual(config.prnu, ForensicLensConfig.default.prnu, "other sections keep their defaults")
+    }
+
+    func testCFAInvalidValueAndUnknownKeyThrow() {
+        XCTAssertThrowsError(try ConfigLoader.parse("cfa:\n  blockSize: big")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "blockSize", value: "big"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("cfa:\n  bayerPattern: RGGB")) { error in
+            XCTAssertEqual(error as? ConfigError, .unknownKey(section: "cfa", key: "bayerPattern"))
+        }
+    }
+
     func testPRNUInvalidValueAndUnknownKeyThrow() {
         XCTAssertThrowsError(try ConfigLoader.parse("prnu:\n  correlationThreshold: high")) { error in
             XCTAssertEqual(error as? ConfigError, .invalidValue(key: "correlationThreshold", value: "high"))

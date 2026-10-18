@@ -81,6 +81,7 @@ let metadata = MetadataAnalyzer()
 let clone = CloneDetectionAnalyzer()
 let doubleCompression = DoubleCompressionAnalyzer()
 let prnu = PRNUAnalyzer()
+let cfa = CFAAnalyzer()
 var jsonResults: [BenchmarkResult] = []
 
 /// Column alignment is done by hand with plain String concatenation
@@ -93,7 +94,7 @@ func padded(_ text: String, to width: Int) -> String {
 
 print("ForensicLens benchmark")
 print("=======================")
-print(padded("size", to: 12) + padded("pixels", to: 10) + padded("ela (ms)", to: 14) + padded("clone (ms)", to: 14) + padded("doublecomp (ms)", to: 18) + padded("prnu (ms)", to: 14) + "metadata (ms)")
+print(padded("size", to: 12) + padded("pixels", to: 10) + padded("ela (ms)", to: 14) + padded("clone (ms)", to: 14) + padded("doublecomp (ms)", to: 18) + padded("prnu (ms)", to: 14) + padded("cfa (ms)", to: 14) + "metadata (ms)")
 
 for (width, height) in sizes {
     let image = try makeNoiseImage(width: width, height: height)
@@ -106,6 +107,10 @@ for (width, height) in sizes {
     // below the four PRNU needs, so that row only measures the size check.
     // The larger sizes run the full wavelet denoise and consistency pass.
     let prnuTime = try timeMilliseconds { _ = try prnu.analyze(image, config: config) }
+    // Random noise has no demosaicing trace, so CFA analysis measures every
+    // block and then stops at the image-level "no trace" check, skipping
+    // only the cheap per-block scoring.
+    let cfaTime = try timeMilliseconds { _ = try cfa.analyze(image, config: config) }
     // MetadataAnalyzer only reads file headers, so it's timed against the
     // same buffer even though this synthetic PPM carries no EXIF -- the
     // point is to show its cost is essentially zero next to pixel analysis.
@@ -117,6 +122,7 @@ for (width, height) in sizes {
         + padded(String(format: "%.2f", cloneTime), to: 14)
         + padded(String(format: "%.2f", doubleCompressionTime), to: 18)
         + padded(String(format: "%.2f", prnuTime), to: 14)
+        + padded(String(format: "%.2f", cfaTime), to: 14)
         + String(format: "%.4f", metadataTime)
     print(row)
 
@@ -125,6 +131,7 @@ for (width, height) in sizes {
     jsonResults.append(BenchmarkResult(analyzer: "Clone Detection", size: sizeLabel, pixels: width * height, milliseconds: cloneTime))
     jsonResults.append(BenchmarkResult(analyzer: "Double Compression", size: sizeLabel, pixels: width * height, milliseconds: doubleCompressionTime))
     jsonResults.append(BenchmarkResult(analyzer: "PRNU", size: sizeLabel, pixels: width * height, milliseconds: prnuTime))
+    jsonResults.append(BenchmarkResult(analyzer: "CFA", size: sizeLabel, pixels: width * height, milliseconds: cfaTime))
     jsonResults.append(BenchmarkResult(analyzer: "Metadata", size: sizeLabel, pixels: width * height, milliseconds: metadataTime))
 }
 

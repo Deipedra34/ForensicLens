@@ -159,6 +159,7 @@ final class DoubleCompressionAnalyzerTests: XCTestCase {
         config.metadata.enabled = false
         config.cloneDetection.enabled = false
         config.prnu.enabled = false
+        config.cfa.enabled = false
 
         let engine = ForensicLensEngine(config: config)
         let image = jpegImage(try Fixtures.uniformBuffer(width: 32, height: 32))

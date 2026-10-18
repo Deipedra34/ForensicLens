@@ -115,6 +115,8 @@ public enum ConfigLoader {
             try applyTiling(key: key, value: value, to: &config.tiling)
         case "prnu":
             try applyPRNU(key: key, value: value, to: &config.prnu)
+        case "cfa":
+            try applyCFA(key: key, value: value, to: &config.cfa)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -231,6 +233,19 @@ public enum ConfigLoader {
             prnu.referenceFolder = parseOptionalPath(value)
         default:
             throw ConfigError.unknownKey(section: "prnu", key: key)
+        }
+    }
+
+    private static func applyCFA(key: String, value: String, to cfa: inout ForensicLensConfig.CFAConfig) throws {
+        switch key {
+        case "enabled":
+            cfa.enabled = try parseBool(key: key, value: value)
+        case "blockSize":
+            cfa.blockSize = try parseInt(key: key, value: value)
+        case "consistencyThreshold":
+            cfa.consistencyThreshold = try parseDouble(key: key, value: value)
+        default:
+            throw ConfigError.unknownKey(section: "cfa", key: key)
         }
     }
 

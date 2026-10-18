@@ -201,3 +201,23 @@ prnu:
   # unedited, full-resolution, same-orientation shots -- 10 or more for a
   # confident result -- and only images of that same size can be checked.
   # referenceFolder: path/to/reference-images
+
+cfa:
+  # Whether CFA (color filter array) demosaicing consistency analysis runs as
+  # part of a combined report. A camera's Bayer sensor records one color per
+  # pixel and interpolates the rest, leaving a period-2 pattern in every
+  # color channel; this flags blocks where that pattern is missing or sits
+  # on a different grid than the rest of the image (spliced, resampled, or
+  # synthesized regions). A supporting signal only: recompression, resizing
+  # and phone computational-photography pipelines weaken or remove the
+  # pattern, in which case the image is reported as not assessed.
+  enabled: true
+
+  # Side length, in pixels, of each compared block. Raised to at least 16
+  # and rounded up to an even number.
+  blockSize: 64
+
+  # A block whose demosaicing-trace strength, relative to the image's typical
+  # strength (about 1 normally, about 0 with no pattern, negative on a
+  # shifted grid), falls below this is flagged. Higher is more sensitive.
+  consistencyThreshold: 0.3
