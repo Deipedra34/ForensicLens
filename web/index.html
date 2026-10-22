@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Nothing on this page may contact another origin. Scripts, the worker, and
+  the .wasm module load only from this site ('wasm-unsafe-eval' is what
+  allows compiling WebAssembly), and connect-src 'self' limits fetches to
+  this site's own static files. The image you pick is read locally and
+  handed to the worker in memory; it's never sent anywhere.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' blob: data:; base-uri 'none'; form-action 'none'">
+<title>ForensicLens Web Demo</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="page-header">
+  <h1>ForensicLens</h1>
+  <p class="tagline">Image manipulation forensics, running entirely in your browser.</p>
+</header>
+
+<main>
+  <section class="card" id="input-card">
+    <div id="drop-zone" class="drop-zone" tabindex="0">
+      <p><strong>Drop an image here</strong> or <label class="link" for="file-input">choose a file</label>.</p>
+      <p class="muted">BMP and PPM/PGM get every analyzer. JPEG gets metadata analysis only, since its pixels aren't decoded yet.</p>
+      <input type="file" id="file-input" accept=".bmp,.ppm,.pgm,.pnm,.jpg,.jpeg,image/bmp,image/jpeg,image/x-portable-anymap" hidden>
+      <button type="button" id="sample-button" class="secondary">Try a sample (copy-move forgery)</button>
+    </div>
+    <p class="privacy">
+      Analysis runs locally in WebAssembly. Your image is never uploaded:
+      this page only loads its own static files, and its security policy
+      blocks requests to any other site.
+    </p>
+  </section>
+
+  <section class="card" id="progress-card" hidden>
+    <p id="progress-label">Starting...</p>
+    <progress id="progress-bar" max="1" value="0"></progress>
+  </section>
+
+  <section class="card error" id="error-card" role="alert" hidden>
+    <h2>Couldn't analyze this image</h2>
+    <p id="error-message"></p>
+  </section>
+
+  <section id="results" hidden>
+    <div class="card summary">
+      <div>
+        <h2 id="file-name"></h2>
+        <p id="image-details" class="muted"></p>
+        <p id="verdict"></p>
+      </div>
+      <div class="score-block">
+        <div id="overall-score" class="score"><span id="score-value"></span><span class="score-max">/100</span></div>
+        <div class="muted">suspicion score</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="layer-toggles" class="toggles"></div>
+      <div class="stage" id="stage">
+        <canvas id="image-canvas"></canvas>
+        <svg id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
+      </div>
+      <p id="preview-note" class="muted" hidden></p>
+    </div>
+
+    <div class="card">
+      <h2>Findings</h2>
+      <div id="findings"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="muted">
+  ForensicLens. Each detector is a supporting signal, not proof; see the project README for each one's limitations.
+</footer>
+</body>
+</html>

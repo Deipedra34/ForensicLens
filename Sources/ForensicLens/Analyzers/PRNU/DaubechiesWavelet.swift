@@ -28,9 +28,17 @@ enum DaubechiesWavelet {
 
     /// The matching high-pass (quadrature mirror) filter:
     /// `g[k] = (-1)^k * h[N-1-k]`.
+    /// Written as a plain loop: the equivalent one-line `map` closure is
+    /// slow enough to type-check that some toolchains (Swift 6.2 targeting
+    /// WebAssembly) give up on it.
     static let highPass: [Double] = {
-        let taps = DaubechiesWavelet.lowPass
-        return (0..<taps.count).map { k in (k % 2 == 0 ? 1.0 : -1.0) * taps[taps.count - 1 - k] }
+        let taps: [Double] = DaubechiesWavelet.lowPass
+        var filter: [Double] = []
+        for k in 0..<taps.count {
+            let sign: Double = k % 2 == 0 ? 1 : -1
+            filter.append(sign * taps[taps.count - 1 - k])
+        }
+        return filter
     }()
 
     /// One detail subband's rectangle within the transformed plane.

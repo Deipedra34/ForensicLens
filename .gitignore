@@ -7,3 +7,7 @@ DerivedData/
 .netrc
 *.xcodeproj
 /benchmark-results.json
+
+# WebAssembly build output (scripts/wasm/build.sh)
+/wasm/.build
+/web/forensiclens.wasm

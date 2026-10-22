@@ -1,0 +1,4 @@
+# Sample images for the web demo. Marked binary so line-ending conversion
+# never touches their pixel data.
+* binary
+.gitattributes text

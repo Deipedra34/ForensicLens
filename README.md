@@ -125,6 +125,7 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 | Concurrent batch scanning of a directory of images | Yes |
 | CI / pre-commit integration (GitHub Action, pre-commit hook, `--fail-threshold`) | Yes |
 | Cross-platform (macOS / Linux) | Yes |
+| Browser demo (WebAssembly, analysis runs client-side) | Yes, see [Web Demo](#web-demo) |
 | Third-party dependencies | None |
 
 ### HTML visual report
@@ -350,6 +351,71 @@ let engine = ForensicLensEngine(config: config)
 let report = engine.run(on: image)
 print(report.textReport)     // or: JSONEncoder().encode(report)
 ```
+
+## Web Demo
+
+`web/` is a static page that runs the full analysis pipeline in the browser: ELA, EXIF/metadata, clone detection, double compression, PRNU, and CFA. It uses the same `ForensicLensEngine` and analyzers as the CLI, compiled to WebAssembly. Pick or drag in an image to get the overall suspicion score, each analyzer's score, summary, and indicators, and the flagged regions drawn over the image (one toggleable color per analyzer, as in the HTML report). A "Try a sample" button loads a bundled copy-move forgery.
+
+**Privacy: the image never leaves your browser.** The file is read locally and analyzed inside the page's own WebAssembly module, in a web worker. Nothing is uploaded. The only network requests are the page's own static files (HTML, CSS, JavaScript, `forensiclens.wasm`, and the sample if you click it). The page's Content-Security-Policy blocks requests to any other origin. The module itself has no file system or network access: its WASI host (`web/wasi-shim.js`) provides only a clock, random numbers, and console output.
+
+### Building
+
+You need a Swift toolchain (6.2 or newer) plus the **Swift SDK for WebAssembly** for *exactly* that toolchain version. The SDK is published on swift.org, maintained with the SwiftWasm project. The URL and checksum for each release are on the [getting-started page](https://www.swift.org/documentation/articles/wasm-getting-started.html). For Swift 6.2.4, for example:
+
+```sh
+swift sdk install \
+  https://download.swift.org/swift-6.2.4-release/wasm-sdk/swift-6.2.4-RELEASE/swift-6.2.4-RELEASE_wasm.artifactbundle.tar.gz \
+  --checksum 32fdb8772d73bb174f77b5c59bc88a0d55003d75712832129394d3465158fb43
+```
+
+Then build:
+
+```sh
+scripts/wasm/build.sh                     # finds the installed Wasm SDK; or SWIFT_SDK=<id from `swift sdk list`>
+```
+
+That writes `web/forensiclens.wasm`. If Binaryen's `wasm-opt` is on your `PATH`, the script also runs it, shrinking the module by about 20%; `WASM_OPT=0` skips it. The `.wasm` is a build output and is ignored by git.
+
+### Running locally
+
+```sh
+python3 -m http.server --directory web 8000
+# then open http://localhost:8000
+```
+
+It has to be served over HTTP. Browsers won't run module workers or fetch WebAssembly from a `file://` page. Any static server works.
+
+To check a build without a browser, `node web/smoke-test.mjs` (Node.js 20 or newer) loads the module through the same JavaScript the page uses. It checks that the bundled copy-move sample is detected, that a uniform image scores 0, and that PRNU and CFA each flag exactly a synthetic spliced block. It checks that corrupt, truncated, empty, and unsupported input each come back as a clear error without breaking the module. It also checks that running analyzers one at a time and combining them gives the same score as one full run. Finally it prints per-analyzer timings.
+
+### What runs, and what doesn't
+
+- All six analyzers run with the default configuration, exactly as `forensiclens-cli report` does without a config file. It's the same code, so the same image should give the same scores and regions. The smoke test checks the outcomes the native test suite checks.
+- Formats are the same as the CLI. BMP and PPM/PGM get every analyzer. JPEG gets metadata analysis only, since JPEG pixel decoding is still a stub (see [Image format support](#image-format-support)). PNG and other formats get an "Unrecognized image format" error. The page previews BMP and JPEG with the browser's own decoder and PPM/PGM with a small JavaScript decoder (`web/pnm.js`).
+- There's no config file, no PRNU `--reference` mode (it needs a folder of camera images), and no batch mode.
+
+### Performance
+
+The page loads a large module once: about 44 MiB after `wasm-opt` (17 MiB gzipped), most of it Foundation and its Unicode (ICU) data. A static host that compresses responses, as GitHub Pages does, sends the gzipped size. Analysis then runs in a web worker, one analyzer at a time, with a progress bar naming the analyzer currently running, so the page stays responsive.
+
+Measured in Node.js 22 (the same V8 engine as Chrome) on a GitHub-hosted runner, for synthetic demosaiced RGB images:
+
+| Image | Total | ELA | Clone | PRNU | CFA | Metadata, double compression |
+|---|---|---|---|---|---|---|
+| 512x512 | 0.5-0.8 s | 0.2-0.4 s | 0.2-0.3 s | 0.05-0.08 s | 0.03-0.06 s | < 0.02 s |
+| 1024x1024 | 2.4-4.4 s | 0.8-1.4 s | 1.3-2.5 s | 0.16-0.26 s | 0.11-0.18 s | < 0.02 s |
+
+The ranges span separate runs on shared runners. WebAssembly runs single-threaded. Clone detection's block matching is quadratic in the number of textured blocks, so it dominates on larger, detailed images. Extrapolating from the table, a detailed 12-megapixel photo could take several minutes and much more memory; that wasn't measured. PRNU and CFA, the heavier detectors natively, stay comparatively cheap because PRNU caps its working resolution (`maximumWorkingDimension`) and CFA is linear in pixel count.
+
+### How it's built
+
+- **Target: `wasm32-unknown-wasi`.** It's the only Swift WebAssembly target with both a C library (which the `CStbImage` decoders need) and Foundation (which the analyzers use for formatting, calendars, and JSON). `wasm32-unknown-unknown` and Embedded Swift (`*_wasm-embedded` SDKs) have neither. Browsers don't implement WASI, so the page supplies the few WASI calls the Swift runtime makes and answers the rest with "not supported".
+- **A separate package.** `wasm/Package.swift` depends on the main package by path, so the main `Package.swift`, its targets, the CLI, and the native tests are untouched. Its one target, `forensiclens-wasm`, is linked as a WASI *reactor*: initialized once, then called repeatedly, rather than run once like a command. `WebAnalysisAPI.swift` holds plain Swift glue over the existing engine (bytes in, JSON out, errors as JSON), and `Exports.swift` exposes it as five C-ABI functions.
+- **Shared code needed one change.** No detector used an API missing under WASI. The only change is in `DaubechiesWavelet`: Swift 6.2 targeting WebAssembly couldn't type-check one one-line `map` closure in reasonable time, so it's now written as an equivalent loop, with no behavior change on any platform.
+- **Robustness.** `web/forensiclens.js` creates a fresh module instance for every call. If the engine ever traps, only that call fails, with a readable error, and the page keeps working. Undecodable input never reaches a trap: it's rejected with a message such as "Unrecognized image format" or "Could not decode the image: ...".
+
+### Hosting (optional, not set up)
+
+The page is plain static files, so any static host works once `web/forensiclens.wasm` is built. One way to put it on GitHub Pages: a workflow that installs Swift and the matching Wasm SDK, runs `scripts/wasm/build.sh`, and publishes `web/` with `actions/upload-pages-artifact` and `actions/deploy-pages`. Pages serves `.wasm` with the right MIME type and compresses it. This repository doesn't do that yet.
 
 ## Configuration reference (`forensiclens.yaml`)
 
@@ -631,6 +697,8 @@ swift test
 ```
 
 The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `RANSACAffineEstimatorTests.swift` covers geometric verification on its own, with no images: synthetic point correspondences generated from a known transform, mixed with planted outliers, must give back that transform's rotation, scale, and translation with every outlier rejected, even when outliers outnumber inliers. Random correspondences, too few correspondences, and collinear points must give no estimate rather than a bogus one. `FeatureCloneDetectionTests.swift` covers the rotation/scale-tolerant clone pass end to end. It pastes a patch of a synthetic texture back into the image after rotating it 30 or 90 degrees, scaling it 1.25x, or rotating 45 degrees while shrinking it to 0.8x. It then checks that the clone is found with the right rotation and scale, and that both reported regions overlap the known ground truth. It also checks that block matching alone misses the rotated copy, that authentic texture, pixel noise, flat images, and tiny images produce no clone (and no crash), and that a rotated clone split across tiles is still found when tiled. `FeatureMatchingCLITests.swift` covers the `--no-feature-matching` flag. The PRNU tests simulate camera sensors (`PRNUFixtures.swift`): a fixed per-pixel gain pattern applied to smooth synthetic scenes, plus read noise. `PRNUMathTests.swift` checks the math on its own against exact or analytic answers: wavelet reconstruction and orthonormality, the Wiener shrinkage rule, FFT outputs and shift recovery, NCC values, lag-correlation signatures of checkerboard and stripe patterns, leave-one-out medians, the consistency formula, and PCE. `PRNUAnalyzerTests.swift` splices a block with no sensor noise, and one with spatially correlated noise, into a simulated capture and checks that exactly that block is flagged, including at reduced working resolution. It also checks that an untouched capture, a uniform image, a clipped image, and a too-small image produce no false finding. `PRNUReferenceTests.swift` builds a fingerprint from five captures of one simulated sensor and checks that a new capture from that sensor matches while one from a different sensor scores lower. It also covers every building error (too few images, mismatched sizes, noiseless references, undecodable or missing files) and `--reference` end to end. The CFA tests simulate a Bayer camera (`CFAFixtures.swift`): a smooth RGB scene is sampled through an RGGB mosaic with sensor noise and bilinearly demosaiced. `CFAPeriodicityTests.swift` checks the math on hand-built grids: the predictor, lattice phases, and the strength statistic's exact values. It also checks that an interpolated green-like or red-like pattern scores high on the right phase, that random noise scores near zero, and that one high-energy block can't outvote the rest. `CFAAnalyzerTests.swift` splices a block of random pixels, one rendered without a mosaic, one upsampled by pixel duplication, and one from a capture with a one-pixel-shifted Bayer grid into a simulated capture. It checks that exactly that block is flagged, and the shifted one as a shifted lattice. It also checks that an untouched capture, an image with no mosaic at all, random noise, flat, grayscale, and too-small images produce no false finding. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`. `EvaluationMetricsTests.swift` checks the precision/recall/F1/accuracy and threshold-sweep math against hand-worked confusion matrices, with no images involved, and `EvaluationToolTests.swift` covers `forensiclens-eval`'s dataset layouts and manifest parsing, its error messages for a malformed dataset, and an end-to-end run (single threshold and sweep, JSON and CSV output) over a handful of synthetic authentic and copy-move images written to a temporary directory, including a corrupt file that must be skipped rather than abort the run.
+
+The WebAssembly build has its own smoke test, `node web/smoke-test.mjs`, run after `scripts/wasm/build.sh` (see [Web Demo](#web-demo)). It isn't part of `swift test` or CI, since it needs the Swift SDK for WebAssembly.
 
 To generate the same coverage report as CI locally (Linux/macOS with the Swift toolchain's `llvm-cov`/`llvm-profdata`):
 
