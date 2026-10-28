@@ -330,6 +330,36 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    // MARK: - JPEG ghost
+
+    func testJPEGGhostIsOnByDefaultWithTheDocumentedSweep() {
+        XCTAssertEqual(ForensicLensConfig.default.jpegGhost, ForensicLensConfig.JPEGGhostConfig(enabled: true, minimumQuality: 50, maximumQuality: 100, qualityStep: 5, blockSize: 32, disagreementThreshold: 10))
+    }
+
+    func testParsingFullJPEGGhostSection() throws {
+        let yaml = """
+        jpegGhost:
+          enabled: false
+          minimumQuality: 60
+          maximumQuality: 95
+          qualityStep: 10
+          blockSize: 48
+          disagreementThreshold: 15
+        """
+        let config = try ConfigLoader.parse(yaml)
+        XCTAssertEqual(config.jpegGhost, ForensicLensConfig.JPEGGhostConfig(enabled: false, minimumQuality: 60, maximumQuality: 95, qualityStep: 10, blockSize: 48, disagreementThreshold: 15))
+        XCTAssertEqual(config.cfa, ForensicLensConfig.default.cfa, "other sections keep their defaults")
+    }
+
+    func testJPEGGhostInvalidValueAndUnknownKeyThrow() {
+        XCTAssertThrowsError(try ConfigLoader.parse("jpegGhost:\n  qualityStep: fine")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "qualityStep", value: "fine"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("jpegGhost:\n  qualities: [50, 60]")) { error in
+            XCTAssertEqual(error as? ConfigError, .unknownKey(section: "jpegGhost", key: "qualities"))
+        }
+    }
+
     func testPRNUInvalidValueAndUnknownKeyThrow() {
         XCTAssertThrowsError(try ConfigLoader.parse("prnu:\n  correlationThreshold: high")) { error in
             XCTAssertEqual(error as? ConfigError, .invalidValue(key: "correlationThreshold", value: "high"))

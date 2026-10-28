@@ -78,7 +78,10 @@ enum TilingCoordinator {
     /// `PRNUAnalyzer`'s doc comment. CFA analysis runs as a single block for
     /// the same image-wide-baseline reason: the recorded Bayer lattice phase
     /// and typical trace strength are estimated across the whole image, and
-    /// it reads one block at a time anyway, so memory stays small. Clone detection is dispatched to `TiledCloneDetection`
+    /// it reads one block at a time anyway, so memory stays small. JPEG ghost
+    /// detection is likewise compared against one image-wide dominant
+    /// quality, which a tile lying entirely inside a splice would get wrong.
+    /// Clone detection is dispatched to `TiledCloneDetection`
     /// instead of `SpatialTileMerger`, since its cross-tile correctness
     /// requirement (a source/copy pair split across two tiles must still
     /// be found) needs a global candidate index rather than independently
@@ -90,7 +93,7 @@ enum TilingCoordinator {
         }
 
         switch analyzer.identifier {
-        case "metadata", "prnu", "cfa":
+        case "metadata", "prnu", "cfa", "jpegghost":
             return try analyzer.analyze(image, config: config)
         case "clone":
             return try TiledCloneDetection.run(image: image, config: config)

@@ -65,13 +65,14 @@ public struct HTMLReportGenerator: Sendable {
         "doublecompression": "#ae3ec9",
         "prnu": "#2f9e44",
         "cfa": "#e64980",
+        "jpegghost": "#1098ad",
     ]
     static let fallbackColor = "#868e96"
 
     /// Human-readable analyzer names, read from the analyzers themselves
     /// so they can't drift from what the rest of the package calls them.
     static let displayNames: [String: String] = {
-        let analyzers: [any Analyzer] = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(), CFAAnalyzer()]
+        let analyzers: [any Analyzer] = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(), CFAAnalyzer(), JPEGGhostAnalyzer()]
         return Dictionary(uniqueKeysWithValues: analyzers.map { ($0.identifier, $0.displayName) })
     }()
 

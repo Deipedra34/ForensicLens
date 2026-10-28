@@ -11,11 +11,11 @@
 
 # ForensicLens
 
-A Swift library and CLI for spotting signs of digital manipulation in still images. It runs six independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, double JPEG compression detection, PRNU sensor-noise analysis, and CFA demosaicing consistency) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
+A Swift library and CLI for spotting signs of digital manipulation in still images. It runs seven independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, double JPEG compression detection, PRNU sensor-noise analysis, CFA demosaicing consistency, and JPEG ghost detection) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
 
 Pure Swift and C, no Apple-only frameworks. Builds and tests on macOS and Linux.
 
-## Why six techniques instead of one
+## Why seven techniques instead of one
 
 None of these methods are conclusive on their own, and each one is blind to a different kind of edit.
 
@@ -26,7 +26,9 @@ None of these methods are conclusive on their own, and each one is blind to a di
 - **PRNU sensor-noise analysis** catches a region whose sensor noise doesn't match the rest of the frame: a patch spliced in from another photo, or one that was smoothed, resampled, or generated. Given reference images from a camera, it can also check whether the photo carries that camera's sensor fingerprint at all. It works on uncompressed or lightly compressed images near native resolution, and has little to say about heavily recompressed, resized, or social-media copies.
 - **CFA demosaicing consistency** catches a region that lacks the period-2 interpolation pattern a Bayer-sensor camera leaves in every color channel, or carries it on a misaligned grid: typical of a patch spliced from another source, rendered, generated, or resampled. Like PRNU, it needs images close to the camera's own output. Recompression, resizing, and phone computational-photography pipelines weaken or remove the pattern, so it's a supporting signal, never a verdict on its own.
 
-Run all six and combine the results, and you catch a wider range of edits than any single technique would on its own. That's the whole point of `SuspicionScorer`.
+- **JPEG ghost detection** catches a region that was JPEG-compressed at a different quality than the rest of the image, typically a patch spliced in from another JPEG. ELA shows that a region's error level differs, and double-compression detection says whether the whole image was saved twice; this names the region and the quality it came from. It needs JPEG-derived pixels and reports "not applicable" on anything else.
+
+Run all seven and combine the results, and you catch a wider range of edits than any single technique would on its own. That's the whole point of `SuspicionScorer`.
 
 ## Architecture
 
@@ -53,6 +55,7 @@ flowchart TB
         DoubleComp[DoubleCompressionAnalyzer]
         PRNU[PRNUAnalyzer]
         CFA[CFAAnalyzer]
+        Ghost[JPEGGhostAnalyzer]
         Scorer[SuspicionScorer]
         Config[ForensicLensConfig]
     end
@@ -75,24 +78,28 @@ flowchart TB
     ImageData --> DoubleComp
     ImageData --> PRNU
     ImageData --> CFA
+    ImageData --> Ghost
     Analyzer -.conforms.-> ELA
     Analyzer -.conforms.-> Meta
     Analyzer -.conforms.-> Clone
     Analyzer -.conforms.-> DoubleComp
     Analyzer -.conforms.-> PRNU
     Analyzer -.conforms.-> CFA
+    Analyzer -.conforms.-> Ghost
     Config --> ELA
     Config --> Meta
     Config --> Clone
     Config --> DoubleComp
     Config --> PRNU
     Config --> CFA
+    Config --> Ghost
     ELA --> Scorer
     Meta --> Scorer
     Clone --> Scorer
     DoubleComp --> Scorer
     PRNU --> Scorer
     CFA --> Scorer
+    Ghost --> Scorer
     Scorer --> Report
     Report --> HTML
     ImageData --> HTML
@@ -114,6 +121,7 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 | Double JPEG Compression Detection | A periodic pattern in a DCT coefficient's histogram, left behind when a JPEG is decompressed, edited, and re-compressed a second time | Yes (JPEG only) | No |
 | PRNU Sensor Noise Analysis | Blocks whose sensor-noise level or correlation structure doesn't match the rest of the image; optionally, whether the image carries a known camera's PRNU fingerprint (`--reference`) | Yes | No |
 | CFA Demosaicing Consistency | Blocks missing the period-2 Bayer interpolation pattern the rest of the image shows, or carrying it on a shifted grid | Yes (RGB only) | No |
+| JPEG Ghost Detection | Blocks whose JPEG "ghost" (the quality at which re-compression changes them least) differs from the rest of the image's | Yes (JPEG-derived only) | No |
 
 | Capability | Status |
 |---|---|
@@ -134,7 +142,7 @@ Text and JSON reports say *what* was flagged; the HTML report shows *where*. `--
 
 - **Suspicion score** and verdict at the top, color-coded by severity.
 - **The analyzed image**, embedded directly in the page as a base64 `data:` URI (BMP and JPEG are embedded byte-for-byte; PPM/PGM, which browsers can't display, are converted to BMP from the already-decoded pixels).
-- **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from, green for PRNU sensor-noise analysis (one box per noise-inconsistent block, plus the analyzed area when an image fails a `--reference` camera check), and pink for CFA demosaicing consistency, one box per block whose Bayer pattern is missing or misaligned.
+- **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from, green for PRNU sensor-noise analysis (one box per noise-inconsistent block, plus the analyzed area when an image fails a `--reference` camera check), pink for CFA demosaicing consistency (one box per block whose Bayer pattern is missing or misaligned), and teal for JPEG ghost detection, one box per block compressed at a different quality than the rest of the image.
 - **A checkbox per analyzer** above the image to show or hide that layer (a few lines of inline JavaScript, no libraries), plus a legend mapping each color to its analyzer.
 - **The full findings breakdown** below the image: analyzer name, score, summary, and every indicator with its region coordinates -- the same information as the text/JSON report.
 
@@ -179,10 +187,11 @@ COMMANDS:
   doublecompression   Run only double JPEG compression detection.
   prnu                Run only PRNU sensor-noise analysis.
   cfa                 Run only CFA demosaicing consistency analysis.
+  jpegghost           Run only JPEG ghost detection.
   batch               Scan directories and/or image files and print one summary report.
   help                Show usage.
 
-OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa):
+OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost):
   --json           Print the report as JSON instead of plain text.
   --html-report <path>
                    Also write a self-contained HTML report to <path>:
@@ -256,6 +265,9 @@ forensiclens-cli prnu photo.ppm --reference camera-reference/
 
 # CFA demosaicing consistency only
 forensiclens-cli cfa photo.bmp
+
+# JPEG ghost detection only (on pixels decoded from a JPEG, e.g. a BMP converted from it)
+forensiclens-cli jpegghost photo-from-jpeg.bmp
 
 # Custom thresholds
 forensiclens-cli report photo.bmp --config strict.yaml
@@ -354,7 +366,7 @@ print(report.textReport)     // or: JSONEncoder().encode(report)
 
 ## Web Demo
 
-`web/` is a static page that runs the full analysis pipeline in the browser: ELA, EXIF/metadata, clone detection, double compression, PRNU, and CFA. It uses the same `ForensicLensEngine` and analyzers as the CLI, compiled to WebAssembly. Pick or drag in an image to get the overall suspicion score, each analyzer's score, summary, and indicators, and the flagged regions drawn over the image (one toggleable color per analyzer, as in the HTML report). A "Try a sample" button loads a bundled copy-move forgery.
+`web/` is a static page that runs the full analysis pipeline in the browser: ELA, EXIF/metadata, clone detection, double compression, PRNU, CFA, and JPEG ghost detection. It uses the same `ForensicLensEngine` and analyzers as the CLI, compiled to WebAssembly. Pick or drag in an image to get the overall suspicion score, each analyzer's score, summary, and indicators, and the flagged regions drawn over the image (one toggleable color per analyzer, as in the HTML report). A "Try a sample" button loads a bundled copy-move forgery.
 
 **Privacy: the image never leaves your browser.** The file is read locally and analyzed inside the page's own WebAssembly module, in a web worker. Nothing is uploaded. The only network requests are the page's own static files (HTML, CSS, JavaScript, `forensiclens.wasm`, and the sample if you click it). The page's Content-Security-Policy blocks requests to any other origin. The module itself has no file system or network access: its WASI host (`web/wasi-shim.js`) provides only a clock, random numbers, and console output.
 
@@ -389,7 +401,7 @@ To check a build without a browser, `node web/smoke-test.mjs` (Node.js 20 or new
 
 ### What runs, and what doesn't
 
-- All six analyzers run with the default configuration, exactly as `forensiclens-cli report` does without a config file. It's the same code, so the same image should give the same scores and regions. The smoke test checks the outcomes the native test suite checks.
+- All seven analyzers run with the default configuration, exactly as `forensiclens-cli report` does without a config file. It's the same code, so the same image should give the same scores and regions. The smoke test checks the outcomes the native test suite checks.
 - Formats are the same as the CLI. BMP and PPM/PGM get every analyzer. JPEG gets metadata analysis only, since JPEG pixel decoding is still a stub (see [Image format support](#image-format-support)). PNG and other formats get an "Unrecognized image format" error. The page previews BMP and JPEG with the browser's own decoder and PPM/PGM with a small JavaScript decoder (`web/pnm.js`).
 - There's no config file, no PRNU `--reference` mode (it needs a folder of camera images), and no batch mode.
 
@@ -399,12 +411,12 @@ The page loads a large module once: about 44 MiB after `wasm-opt` (17 MiB gzippe
 
 Measured in Node.js 22 (the same V8 engine as Chrome) on a GitHub-hosted runner, for synthetic demosaiced RGB images:
 
-| Image | Total | ELA | Clone | PRNU | CFA | Metadata, double compression |
-|---|---|---|---|---|---|---|
-| 512x512 | 0.5-0.8 s | 0.2-0.4 s | 0.2-0.3 s | 0.05-0.08 s | 0.03-0.06 s | < 0.02 s |
-| 1024x1024 | 2.4-4.4 s | 0.8-1.4 s | 1.3-2.5 s | 0.16-0.26 s | 0.11-0.18 s | < 0.02 s |
+| Image | Total | ELA | Clone | JPEG ghost | PRNU | CFA | Metadata, double compression |
+|---|---|---|---|---|---|---|---|
+| 512x512 | 0.8-1.4 s | 0.22-0.37 s | 0.20-0.32 s | 0.26-0.44 s | 0.06-0.09 s | 0.05-0.07 s | < 0.05 s |
+| 1024x1024 | 3.5-6.3 s | 0.81-1.39 s | 1.37-2.69 s | 0.98-1.67 s | 0.18-0.29 s | 0.12-0.19 s | < 0.05 s |
 
-The ranges span separate runs on shared runners. WebAssembly runs single-threaded. Clone detection's block matching is quadratic in the number of textured blocks, so it dominates on larger, detailed images. Extrapolating from the table, a detailed 12-megapixel photo could take several minutes and much more memory; that wasn't measured. PRNU and CFA, the heavier detectors natively, stay comparatively cheap because PRNU caps its working resolution (`maximumWorkingDimension`) and CFA is linear in pixel count.
+The ranges span two runs on shared runners, which differed by about 1.7x across the board. WebAssembly runs single-threaded. Clone detection's block matching is quadratic in the number of textured blocks, so it dominates on larger, detailed images. Extrapolating from the table, a detailed 12-megapixel photo could take several minutes and much more memory; that wasn't measured. PRNU and CFA stay comparatively cheap, because PRNU caps its working resolution (`maximumWorkingDimension`) and CFA is linear in pixel count. JPEG ghost detection is linear too, at about 1.2x ELA, from its 11 re-compression passes.
 
 ### How it's built
 
@@ -471,6 +483,14 @@ cfa:
   enabled: true
   blockSize: 64                  # px per compared block (min 16, rounded up to even)
   consistencyThreshold: 0.3      # blocks below this fraction of the image's typical Bayer-pattern strength are flagged
+
+jpegGhost:
+  enabled: true
+  minimumQuality: 50             # re-compression sweep range (1-100)...
+  maximumQuality: 100
+  qualityStep: 5                 # ...and step; each level is one full re-compression of the image
+  blockSize: 32                  # px per compared block (min 16, rounded up to a multiple of 8)
+  disagreementThreshold: 10      # quality points a block's ghost must differ from the image's to be flagged
 ```
 
 ## Per-analyzer implementation notes
@@ -487,7 +507,7 @@ Deeper trade-off discussion lives in [`docs/algorithms.md`](docs/algorithms.md) 
   - **Limitations.** Keypoint descriptors need room. A cloned region smaller than roughly 40-50px across, at the source's scale, rarely has `minimumMatchedKeypoints` keypoints far enough inside it to describe without picking up the surrounding pasted-over pixels, so small clones are left to block matching (which handles them only if unrotated). Flat or very smooth regions have no corners to match. Mirrored (flipped) copies aren't detected, since BRIEF descriptors aren't mirror-invariant. Scale changes beyond about 3x either way, or heavy shear, are rejected as implausible. Like block matching, genuinely repetitive real-world texture (tiled floors, brick, window grids) can be self-similar under a consistent transform and produce false positives; raise `minimumMatchedKeypoints` if that's a problem. Cost: extraction is roughly linear in pixel count, plus a matching step quadratic in `maximumKeypoints` (each comparison is just four XOR-popcounts). That's usually far cheaper than block matching's quadratic block comparison on large images, but it's a real addition on small ones. Working memory is around 24 bytes per pixel at full resolution while extracting.
   - **Tiling.** On a tiled (large) image, both passes pool their evidence image-wide before matching rather than resetting per tile: block candidates and keypoints are each collected tile by tile into one global index, so a copy-move whose source and pasted copy fall in two different tiles is still caught. See "Tiled processing for large images" above.
 - **Double compression detection** looks for the classic double-JPEG-compression signature: it splits the decoded image into an 8x8 grid of luma blocks (JPEG's own block size), runs a forward DCT on each one, and builds a histogram of one chosen low-frequency AC coefficient (`(1,1)` by default) across every block. A JPEG compressed once quantizes that coefficient to multiples of a single step, which just thins the histogram out evenly. Compressing a *second* time at a different quality requantizes values that are already multiples of the first step to multiples of a second, generally different one -- and because the two steps don't line up, some of the final histogram's non-empty bins end up noticeably fatter or thinner than their neighbors, in a pattern that repeats with a period tied to the ratio between the two steps. This analyzer removes the histogram's broad, natural envelope (a small local moving average) and runs a discrete Fourier transform over what's left, purely to see whether one frequency's energy dominates -- a strong single peak means a periodic comb is present; a flat spectrum means the histogram never had one. Since a crop between the two compressions shifts JPEG's 8x8 block grid relative to the file's own pixel `(0, 0)`, it repeats this scan at several candidate pixel offsets and keeps whichever one shows the strongest periodicity. Being a JPEG-quantization-specific signal, it reports "not applicable" on any non-JPEG input rather than a false negative. See `DoubleCompressionAnalyzer` and `DCTPeriodicityAnalysis`'s doc comments for the full reasoning.
-- **PRNU sensor-noise analysis** and **CFA demosaicing consistency** have their own sections below.
+- **PRNU sensor-noise analysis**, **CFA demosaicing consistency**, and **JPEG ghost detection** have their own sections below.
 
 ## PRNU Analysis
 
@@ -562,6 +582,36 @@ This is a **supporting signal, not a standalone verdict**, for the same reasons 
 
 **Cost.** One pass per color channel with a 4-pixel predictor, plus a median per lattice position per block: linear in pixel count, and much cheaper than PRNU. It reads one block at a time, so memory stays at a few block-sized planes regardless of image size. It never downsamples, since that would erase the lattice it measures. Like PRNU, it runs outside the tiling layer, because every block is compared against an image-wide baseline and lattice phase.
 
+## JPEG Ghost Detection
+
+Re-saving a JPEG at the quality it was last saved at changes almost nothing: its DCT coefficients are already multiples of that quality's quantization steps, so quantizing them again lands them back in place. Re-saving at any other quality changes it noticeably. `JPEGGhostAnalyzer` uses that, after Farid (2009). It re-compresses the image at every quality from `minimumQuality` to `maximumQuality` in `qualityStep` increments (default 50 to 100 in steps of 5, so 11 passes). For each `blockSize` block it records how much each pass changed it. Plotted against quality, that difference trends down toward 100, but dips sharply wherever the region was saved before. Those dips are its *ghosts*.
+
+Saving the finished image leaves a deep dip at the final quality in every block. A region spliced in from a JPEG saved at another quality carries a *second* dip at its own original quality. So a block's ghost quality is its lowest-quality dip, the earliest compression it shows (a dip counts if it's below both neighbors by at least 30%). The image's quality is the most common block ghost quality. Blocks at least `disagreementThreshold` quality points away from it (default 10, two steps) are flagged and drawn in teal. They're reported as regions in the same shape as clone detection, PRNU, and CFA, and scored the same way: up to 70 points for the share of blocks flagged (saturating at 5%), plus up to 30 for how far their quality is off.
+
+```sh
+forensiclens-cli jpegghost photo-from-jpeg.bmp
+forensiclens-cli report photo-from-jpeg.bmp --html-report photo-report.html   # ghost blocks drawn in teal
+```
+
+```yaml
+jpegGhost:
+  qualityStep: 10          # half the work; can step over a ghost between two levels
+  disagreementThreshold: 15
+```
+
+**JPEG-only.** A never-compressed image has no ghosts at all: its curves fall steadily toward quality 100. Rather than score such input, the analyzer reports **"not applicable"** (score 0) for lossless originals and PNG/BMP/PPM exports that never went through JPEG. A BMP or PPM *decoded from* a JPEG keeps the compression history in its pixels and is analyzed normally. That's the way to analyze JPEGs today, as in [Using CASIA](#using-casia), since this package doesn't decode JPEG pixels itself yet. A file that's tagged JPEG but shows no usable ghost is reported as "not assessed". That happens when it was saved above the swept range, cropped off its 8x8 grid, or resized.
+
+**Limitations**
+
+- **Same quality, no signal.** A splice from a JPEG saved at the same quality as the host (within `disagreementThreshold`) leaves nothing to disagree about.
+- **Coarser re-saving erases it.** If the composite is saved at a *lower* quality than the splice's original, the coarser quantization wipes out the splice's finer grid, and its ghost with it. The reverse works: a quality-60 patch saved into a quality-85 image is found, and so is a quality-90 patch in a quality-70 image saved at 90.
+- **Uniform re-saving, resizing, and cropping** off the 8x8 grid weaken or erase ghosts everywhere. A heavily recompressed or social-media copy usually has only the platform's final quality left.
+- **Alignment.** A spliced patch that doesn't sit on the host's 8x8 grid carries its old grid at an offset. In testing, a 64px patch offset by (3, 5) pixels was caught in only one of the four blocks it covered.
+- **Flat areas** that re-compression doesn't change measurably are skipped, as are blocks whose curve shows no ghost at all.
+- Only luminance is analyzed. It's quantized with the same table the simulator uses, at full resolution, while chroma is usually subsampled with a different table.
+
+**Cost and reuse.** Each swept quality is one luminance-only re-compression of the whole image. It runs through the same `JPEGRecompressionSimulator` (now in `Sources/ForensicLens/JPEG/JPEGRecompression.swift`) that ELA and the double-compression tests use, so there's one re-compression routine in the package. With the defaults that's 11 single-channel passes, against ELA's default 3 qualities x 3 color channels, so roughly 1.2x ELA's time: linear in pixel count, and listed in the [benchmark table](#benchmarking). There's no downsampling, which would destroy the 8x8 grid the ghosts live on. Raise `qualityStep` to 10 to halve the work, at the risk of stepping over a ghost that falls between two levels. Only one re-compressed copy of the image is held at a time, and like PRNU and CFA it runs outside the tiling layer, because every block is compared against one image-wide dominant quality.
+
 ## Image format support
 
 Decoding lives entirely in `CStbImage` (C) behind the `ImageDecoding` module, and currently covers uncompressed BMP and binary PPM/PGM. That's enough to build every test fixture in-process without shipping binary test assets or depending on a real JPEG decoder. JPEG *files* are recognized by magic number (so metadata analysis works on them), but JPEG *pixel* decoding is a documented stub (`cstbi_decode_jpeg_baseline`). ELA, clone detection, and double compression detection require decoded pixels, so they'll throw `AnalyzerError.unsupportedInput` on a JPEG until a real decoder gets dropped in behind that one seam.
@@ -601,7 +651,7 @@ The table below is generated by [`.github/workflows/benchmark.yml`](.github/work
 
 <!-- BENCHMARK-TABLE-END -->
 
-ELA scales roughly linearly with pixel count, since it's a fixed amount of work per 8x8 block -- multiplied by the number of quality levels in `elaQualityLevels` (3 by default), since it recompresses once per configured level. Dropping to fewer quality levels is the lever to pull if ELA itself is the bottleneck; the table above reflects the default three-level scan, so it runs roughly 3x what a single-quality scan would take. Clone detection scales worse: block matching compares every candidate block against every other candidate block, which is quadratic in block count. So a larger `blockSize` or `blockStride` in `forensiclens.yaml` is the lever to pull if it's too slow on large images. The clone timings include the rotation/scale-tolerant feature-matching pass, which adds keypoint extraction (roughly linear in pixel count) and keypoint matching (quadratic in `maximumKeypoints`, but with very cheap comparisons). `--no-feature-matching` drops back to block matching alone. Metadata analysis only reads a file's header, so its cost stays flat regardless of image size. PRNU analysis scales linearly with pixel count up to `maximumWorkingDimension`, past which the image is downsampled to fit, so its cost levels off. At the default 64px block size, the 64x64 row holds a single block, below the four the check needs, so it only measures that size check. The larger rows run the full wavelet denoise and consistency pass. The table doesn't include reference verification (`--reference`), which adds FFTs on top. CFA analysis is linear in pixel count. The benchmark's random-noise images carry no demosaicing pattern, so its rows cover measuring every block, and skip only the cheap per-block scoring that a "not assessed" result never reaches.
+ELA scales roughly linearly with pixel count, since it's a fixed amount of work per 8x8 block -- multiplied by the number of quality levels in `elaQualityLevels` (3 by default), since it recompresses once per configured level. Dropping to fewer quality levels is the lever to pull if ELA itself is the bottleneck; the table above reflects the default three-level scan, so it runs roughly 3x what a single-quality scan would take. Clone detection scales worse: block matching compares every candidate block against every other candidate block, which is quadratic in block count. So a larger `blockSize` or `blockStride` in `forensiclens.yaml` is the lever to pull if it's too slow on large images. The clone timings include the rotation/scale-tolerant feature-matching pass, which adds keypoint extraction (roughly linear in pixel count) and keypoint matching (quadratic in `maximumKeypoints`, but with very cheap comparisons). `--no-feature-matching` drops back to block matching alone. Metadata analysis only reads a file's header, so its cost stays flat regardless of image size. PRNU analysis scales linearly with pixel count up to `maximumWorkingDimension`, past which the image is downsampled to fit, so its cost levels off. At the default 64px block size, the 64x64 row holds a single block, below the four the check needs, so it only measures that size check. The larger rows run the full wavelet denoise and consistency pass. The table doesn't include reference verification (`--reference`), which adds FFTs on top. CFA analysis is linear in pixel count. JPEG ghost detection costs about 1.2x ELA (11 single-channel re-compressions against ELA's 9). The benchmark's never-compressed noise images have no JPEG history, but finding that out takes the full sweep, so its rows show the whole cost. The benchmark's random-noise images carry no demosaicing pattern, so its rows cover measuring every block, and skip only the cheap per-block scoring that a "not assessed" result never reaches.
 
 These sizes all sit well under the default `tilingThreshold` (4096px), so the table above reflects the untiled, single-block path every image this small already used before tiling existed. A genuinely "large" case -- large enough to trigger tiling automatically -- isn't in the automated table above: clone detection's quadratic block-comparison cost (see above) makes a multi-thousand-pixel image impractically slow for a CI benchmark run regardless of tiling, since tiling pools candidates globally rather than shrinking that comparison (a correctness requirement -- see "Tiled processing for large images"). Tiling exists to bound peak *memory* on a large image, not to reduce total analysis work, so it wouldn't materially change these numbers anyway for the analyzers it does apply to. To see tiling's effect on a specific large image of your own, compare `--tile-size <n>` against `--no-tiling` directly:
 
@@ -696,7 +746,7 @@ Unlike the benchmark table above, which `.github/workflows/benchmark.yml` regene
 swift test
 ```
 
-The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `RANSACAffineEstimatorTests.swift` covers geometric verification on its own, with no images: synthetic point correspondences generated from a known transform, mixed with planted outliers, must give back that transform's rotation, scale, and translation with every outlier rejected, even when outliers outnumber inliers. Random correspondences, too few correspondences, and collinear points must give no estimate rather than a bogus one. `FeatureCloneDetectionTests.swift` covers the rotation/scale-tolerant clone pass end to end. It pastes a patch of a synthetic texture back into the image after rotating it 30 or 90 degrees, scaling it 1.25x, or rotating 45 degrees while shrinking it to 0.8x. It then checks that the clone is found with the right rotation and scale, and that both reported regions overlap the known ground truth. It also checks that block matching alone misses the rotated copy, that authentic texture, pixel noise, flat images, and tiny images produce no clone (and no crash), and that a rotated clone split across tiles is still found when tiled. `FeatureMatchingCLITests.swift` covers the `--no-feature-matching` flag. The PRNU tests simulate camera sensors (`PRNUFixtures.swift`): a fixed per-pixel gain pattern applied to smooth synthetic scenes, plus read noise. `PRNUMathTests.swift` checks the math on its own against exact or analytic answers: wavelet reconstruction and orthonormality, the Wiener shrinkage rule, FFT outputs and shift recovery, NCC values, lag-correlation signatures of checkerboard and stripe patterns, leave-one-out medians, the consistency formula, and PCE. `PRNUAnalyzerTests.swift` splices a block with no sensor noise, and one with spatially correlated noise, into a simulated capture and checks that exactly that block is flagged, including at reduced working resolution. It also checks that an untouched capture, a uniform image, a clipped image, and a too-small image produce no false finding. `PRNUReferenceTests.swift` builds a fingerprint from five captures of one simulated sensor and checks that a new capture from that sensor matches while one from a different sensor scores lower. It also covers every building error (too few images, mismatched sizes, noiseless references, undecodable or missing files) and `--reference` end to end. The CFA tests simulate a Bayer camera (`CFAFixtures.swift`): a smooth RGB scene is sampled through an RGGB mosaic with sensor noise and bilinearly demosaiced. `CFAPeriodicityTests.swift` checks the math on hand-built grids: the predictor, lattice phases, and the strength statistic's exact values. It also checks that an interpolated green-like or red-like pattern scores high on the right phase, that random noise scores near zero, and that one high-energy block can't outvote the rest. `CFAAnalyzerTests.swift` splices a block of random pixels, one rendered without a mosaic, one upsampled by pixel duplication, and one from a capture with a one-pixel-shifted Bayer grid into a simulated capture. It checks that exactly that block is flagged, and the shifted one as a shifted lattice. It also checks that an untouched capture, an image with no mosaic at all, random noise, flat, grayscale, and too-small images produce no false finding. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`. `EvaluationMetricsTests.swift` checks the precision/recall/F1/accuracy and threshold-sweep math against hand-worked confusion matrices, with no images involved, and `EvaluationToolTests.swift` covers `forensiclens-eval`'s dataset layouts and manifest parsing, its error messages for a malformed dataset, and an end-to-end run (single threshold and sweep, JSON and CSV output) over a handful of synthetic authentic and copy-move images written to a temporary directory, including a corrupt file that must be skipped rather than abort the run.
+The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `RANSACAffineEstimatorTests.swift` covers geometric verification on its own, with no images: synthetic point correspondences generated from a known transform, mixed with planted outliers, must give back that transform's rotation, scale, and translation with every outlier rejected, even when outliers outnumber inliers. Random correspondences, too few correspondences, and collinear points must give no estimate rather than a bogus one. `FeatureCloneDetectionTests.swift` covers the rotation/scale-tolerant clone pass end to end. It pastes a patch of a synthetic texture back into the image after rotating it 30 or 90 degrees, scaling it 1.25x, or rotating 45 degrees while shrinking it to 0.8x. It then checks that the clone is found with the right rotation and scale, and that both reported regions overlap the known ground truth. It also checks that block matching alone misses the rotated copy, that authentic texture, pixel noise, flat images, and tiny images produce no clone (and no crash), and that a rotated clone split across tiles is still found when tiled. `FeatureMatchingCLITests.swift` covers the `--no-feature-matching` flag. The PRNU tests simulate camera sensors (`PRNUFixtures.swift`): a fixed per-pixel gain pattern applied to smooth synthetic scenes, plus read noise. `PRNUMathTests.swift` checks the math on its own against exact or analytic answers: wavelet reconstruction and orthonormality, the Wiener shrinkage rule, FFT outputs and shift recovery, NCC values, lag-correlation signatures of checkerboard and stripe patterns, leave-one-out medians, the consistency formula, and PCE. `PRNUAnalyzerTests.swift` splices a block with no sensor noise, and one with spatially correlated noise, into a simulated capture and checks that exactly that block is flagged, including at reduced working resolution. It also checks that an untouched capture, a uniform image, a clipped image, and a too-small image produce no false finding. `PRNUReferenceTests.swift` builds a fingerprint from five captures of one simulated sensor and checks that a new capture from that sensor matches while one from a different sensor scores lower. It also covers every building error (too few images, mismatched sizes, noiseless references, undecodable or missing files) and `--reference` end to end. The CFA tests simulate a Bayer camera (`CFAFixtures.swift`): a smooth RGB scene is sampled through an RGGB mosaic with sensor noise and bilinearly demosaiced. `CFAPeriodicityTests.swift` checks the math on hand-built grids: the predictor, lattice phases, and the strength statistic's exact values. It also checks that an interpolated green-like or red-like pattern scores high on the right phase, that random noise scores near zero, and that one high-energy block can't outvote the rest. `CFAAnalyzerTests.swift` splices a block of random pixels, one rendered without a mosaic, one upsampled by pixel duplication, and one from a capture with a one-pixel-shifted Bayer grid into a simulated capture. It checks that exactly that block is flagged, and the shifted one as a shifted lattice. It also checks that an untouched capture, an image with no mosaic at all, random noise, flat, grayscale, and too-small images produce no false finding. The JPEG ghost tests build every JPEG with the same simulator the analyzers use. `JPEGGhostMathTests.swift` checks the sweep's quality levels, block difference maps, the ghost quality of hand-made difference curves (a steadily falling curve has none, the lowest of several dips wins, shallow ripples and the lossless end never count), and the dominant-quality vote. `ConfigTests.swift` covers the new `jpegGhost` section. `JPEGGhostAnalyzerTests.swift` takes a host texture saved at one quality, splices in a block of another texture pre-compressed at a clearly different quality, and saves the composite again. It checks that exactly the spliced blocks are flagged, both for a quality-60 patch in a quality-85 image and for a quality-90 patch in a quality-70 image saved at 90, in grayscale and RGB. It also checks that an untouched JPEG is consistent and that a patch re-saved at a coarser quality goes undetected (a documented limitation). Finally, a never-compressed image must report "not applicable", a JPEG-tagged file without a usable ghost "not assessed", and flat, too-small, and too-narrow-range inputs a clear summary. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`. `EvaluationMetricsTests.swift` checks the precision/recall/F1/accuracy and threshold-sweep math against hand-worked confusion matrices, with no images involved, and `EvaluationToolTests.swift` covers `forensiclens-eval`'s dataset layouts and manifest parsing, its error messages for a malformed dataset, and an end-to-end run (single threshold and sweep, JSON and CSV output) over a handful of synthetic authentic and copy-move images written to a temporary directory, including a corrupt file that must be skipped rather than abort the run.
 
 The WebAssembly build has its own smoke test, `node web/smoke-test.mjs`, run after `scripts/wasm/build.sh` (see [Web Demo](#web-demo)). It isn't part of `swift test` or CI, since it needs the Swift SDK for WebAssembly.
 

@@ -109,7 +109,7 @@ const inSplice = (x, y) => x >= 128 && x < 192 && y >= 64 && y < 128;
 
 const analyzers = await lens.analyzers();
 check(
-  JSON.stringify(analyzers.map((a) => a.id)) === JSON.stringify(["ela", "metadata", "clone", "doublecompression", "prnu", "cfa"]),
+  JSON.stringify(analyzers.map((a) => a.id)) === JSON.stringify(["ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost"]),
   "lists every analyzer in run order",
   analyzers.map((a) => a.id).join(", ")
 );
@@ -118,7 +118,7 @@ const copyMove = new Uint8Array(await readFile(new URL("samples/copy-move.ppm", 
 const full = await lens.analyze(copyMove);
 const clone = finding(full.report, "clone");
 check(full.image?.pixelsDecoded === true && full.image.width > 0, "decodes the sample PPM", `${full.image?.width}x${full.image?.height}`);
-check(full.report.findings.length === 6, "runs all six analyzers", `${full.report.findings.length} findings`);
+check(full.report.findings.length === analyzers.length, "runs every analyzer", `${full.report.findings.length} findings`);
 check(clone?.score > 0 && regionsOf(clone).length >= 2, "detects the sample's copy-move forgery", `clone score ${clone?.score?.toFixed(1)}, ${regionsOf(clone).length} regions`);
 check(full.report.overallScore >= clone.score, "overall score reflects it", `overall ${full.report.overallScore.toFixed(1)}, ${full.report.verdict}`);
 

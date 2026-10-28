@@ -117,6 +117,8 @@ public enum ConfigLoader {
             try applyPRNU(key: key, value: value, to: &config.prnu)
         case "cfa":
             try applyCFA(key: key, value: value, to: &config.cfa)
+        case "jpegGhost":
+            try applyJPEGGhost(key: key, value: value, to: &config.jpegGhost)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -246,6 +248,25 @@ public enum ConfigLoader {
             cfa.consistencyThreshold = try parseDouble(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "cfa", key: key)
+        }
+    }
+
+    private static func applyJPEGGhost(key: String, value: String, to ghost: inout ForensicLensConfig.JPEGGhostConfig) throws {
+        switch key {
+        case "enabled":
+            ghost.enabled = try parseBool(key: key, value: value)
+        case "minimumQuality":
+            ghost.minimumQuality = try parseInt(key: key, value: value)
+        case "maximumQuality":
+            ghost.maximumQuality = try parseInt(key: key, value: value)
+        case "qualityStep":
+            ghost.qualityStep = try parseInt(key: key, value: value)
+        case "blockSize":
+            ghost.blockSize = try parseInt(key: key, value: value)
+        case "disagreementThreshold":
+            ghost.disagreementThreshold = try parseInt(key: key, value: value)
+        default:
+            throw ConfigError.unknownKey(section: "jpegGhost", key: key)
         }
     }
 

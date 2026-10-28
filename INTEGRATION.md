@@ -104,6 +104,6 @@ The hook uses pre-commit's `swift` language support. pre-commit builds ForensicL
 
 The integrations analyze exactly what the CLI analyzes. See [Image format support](README.md#image-format-support) in the README. Currently:
 
-- **JPEG** files get metadata (EXIF) analysis. Their pixels aren't decoded yet, so pixel-based analyzers (error level analysis, clone detection, double compression, PRNU sensor noise, CFA demosaicing) don't contribute to their score.
+- **JPEG** files get metadata (EXIF) analysis. Their pixels aren't decoded yet, so pixel-based analyzers (error level analysis, clone detection, double compression, PRNU sensor noise, CFA demosaicing, JPEG ghosts) don't contribute to their score.
 - **PNG** files aren't decoded yet. They're reported as skipped and never fail the check.
 - **BMP and PPM/PGM** files get every analyzer. Add them with `extensions` in the action, or `args: [--extensions, "bmp,ppm,jpg,jpeg,png"]` in the hook along with matching `types_or`/`files` filters.

@@ -221,3 +221,28 @@ cfa:
   # strength (about 1 normally, about 0 with no pattern, negative on a
   # shifted grid), falls below this is flagged. Higher is more sensitive.
   consistencyThreshold: 0.3
+
+jpegGhost:
+  # Whether JPEG ghost detection runs as part of a combined report. The
+  # image is re-compressed at every quality in the range below; a region
+  # once saved at some quality changes least when re-compressed at that
+  # quality (its "ghost"). Blocks whose ghost quality differs from the rest
+  # of the image's are flagged as likely spliced from another JPEG. Only
+  # meaningful on JPEG-derived pixels: an image with no JPEG compression
+  # history is reported as not applicable.
+  enabled: true
+
+  # Quality range (1-100) and step of the re-compression sweep. Every level
+  # costs one full re-compression of the image; a step of 10 halves the
+  # work but can step over a ghost that falls between two levels.
+  minimumQuality: 50
+  maximumQuality: 100
+  qualityStep: 5
+
+  # Side length, in pixels, of each compared block. Raised to at least 16
+  # and rounded up to a multiple of 8 so blocks sit on the JPEG 8x8 grid.
+  blockSize: 32
+
+  # How many quality points a block's ghost must differ from the image's
+  # dominant ghost to be flagged.
+  disagreementThreshold: 10

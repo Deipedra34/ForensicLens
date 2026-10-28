@@ -13,6 +13,7 @@ const layerColors = {
   doublecompression: "#ae3ec9",
   prnu: "#2f9e44",
   cfa: "#e64980",
+  jpegghost: "#1098ad",
 };
 const fallbackColor = "#868e96";
 

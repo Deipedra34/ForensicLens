@@ -57,6 +57,25 @@ The pipeline is split into small, separately tested pieces. `PRNUPlane` is a `Do
 
 **Numbers from the synthetic captures** (smooth RGB scene, RGGB mosaic, sensor noise of 2 levels, bilinear demosaicing, 64px blocks): genuine blocks score 0.94 or more, and 0.53 or more when half the frame carries strong texture. A block of random pixels scores 0.006, a block rendered without a mosaic 0.026, and a 2x pixel-duplicated upsample -0.004. Bilinear upsampling scores -0.11 at 2x and 0.11 at 1.5x. A block from a capture whose Bayer grid is offset by one pixel scores -0.38. An image with no mosaic anywhere has a median green strength of 0.15 and is not assessed. That spread is where the 0.3 default threshold comes from.
 
+## JPEG ghost detection (`Sources/ForensicLens/Analyzers/JPEGGhost`)
+
+`JPEGGhostMath` holds the testable pieces (quality levels, block differences, ghosts in a curve, the dominant-quality vote), `JPEGGhostAnalysis` runs the sweep, and `JPEGGhostAnalyzer` does the gating and scoring. Re-compression goes through `JPEGRecompressionSimulator`. That used to live in `ELAAnalyzer.swift` and is now in `Sources/ForensicLens/JPEG/JPEGRecompression.swift` (moved unchanged, together with `DCT8x8`), so ELA, double-compression detection, and ghosts share one routine.
+
+**Why "lowest dip" and not "smallest difference".** The textbook description, "each block's ghost quality is where its difference is smallest", fails on the usual forgery. Whoever made the composite saved it, so *every* block has a near-zero difference at the final save quality, and an argmin returns that quality everywhere. The splice survives only as a second, shallower dip at its original quality. On a 128x128 synthetic texture saved at 85, with a 32px patch from a quality-60 JPEG, re-saved at 85, the spliced block's curve reads 50: 3.15, 55: 2.25, **60: 0.84**, 65: 3.04, ... **85: 0.00**. A host block falls steadily from 16 to **0.00 at 85**, with no dip at 60. So a ghost is any local minimum at least 30% below both neighbors (the lowest swept quality counts against its single neighbor, the highest never does), and a block's ghost quality is its lowest one. A never-compressed image has no dips anywhere: its curve falls monotonically to about 0.08 at quality 100.
+
+**Decisions and their measured effect** (256x256 smooth texture, 32px blocks, default sweep):
+
+| Scenario | Dominant | Flagged |
+|---|---|---|
+| never compressed | none, so "not applicable" | none |
+| saved once at 85 | 85 | none |
+| quality-60 patch, composite saved at 85 | 85 | exactly the 4 spliced blocks (ghost 60) |
+| quality-90 patch into a quality-70 host, saved at 90 | 70 | exactly the 4 spliced blocks (ghost 90) |
+| same quality-60 patch, offset (3, 5) off the grid | 85 | 1 of 4 blocks |
+| quality-90 patch, composite saved at 75 | 75 | none (the coarser save erases it) |
+
+The image counts as having a compression history when at least half of the measurable blocks (largest difference at least 0.5 squared gray levels) show a ghost. The dominant quality is the most common block ghost quality, with ties going to the lower quality. Only luminance is swept: a real JPEG quantizes it with the standard IJG luminance table the simulator uses, at full resolution, and it costs a third of sweeping three channels.
+
 ## Combining scores (`Sources/ForensicLens/Scoring/SuspicionScorer.swift`)
 
 `SuspicionScorer` takes the strongest single analyzer score as the dominant signal and lets the other two add a smaller, capped amount on top when they back it up, rather than just averaging all three. A plain average would let one unambiguous finding (say, a 95 on clone detection) get diluted by two analyzers that simply had nothing to say about a small, EXIF-less BMP — and that's not really how a human reviewer would weigh the same pile of evidence anyway.

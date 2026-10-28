@@ -46,7 +46,7 @@ enum WebAnalysisAPI {
     /// Display names, read from the analyzers themselves (the same way the
     /// HTML report does) so they can't drift from the library's.
     static let displayNames: [String: String] = {
-        let analyzers: [any Analyzer] = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(), CFAAnalyzer()]
+        let analyzers: [any Analyzer] = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(), CFAAnalyzer(), JPEGGhostAnalyzer()]
         return Dictionary(uniqueKeysWithValues: analyzers.map { ($0.identifier, $0.displayName) })
     }()
 

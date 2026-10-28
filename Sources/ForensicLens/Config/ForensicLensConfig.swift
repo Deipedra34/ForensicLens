@@ -282,6 +282,46 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         public static let `default` = CFAConfig(enabled: true, blockSize: 64, consistencyThreshold: 0.3)
     }
 
+    /// Settings for `JPEGGhostAnalyzer`.
+    public struct JPEGGhostConfig: Codable, Equatable, Sendable {
+        /// Whether JPEG ghost detection runs as part of a combined report.
+        public var enabled: Bool
+
+        /// Lowest JPEG quality (1...100) the image is re-compressed at.
+        public var minimumQuality: Int
+
+        /// Highest JPEG quality (1...100) the image is re-compressed at.
+        public var maximumQuality: Int
+
+        /// Quality increment between re-compressions. Each level costs one
+        /// full re-compression of the image, so this is the main speed lever:
+        /// a step of 10 halves the work of the default 5, but can step over a
+        /// ghost between two levels.
+        public var qualityStep: Int
+
+        /// Side length, in pixels, of each compared block. Raised to at
+        /// least 16 and rounded up to a multiple of 8, so blocks sit on the
+        /// JPEG 8x8 grid.
+        public var blockSize: Int
+
+        /// How far (in quality points) a block's ghost quality must be from
+        /// the image's dominant one to be flagged. 10 is two steps at the
+        /// default step size.
+        public var disagreementThreshold: Int
+
+        public init(enabled: Bool, minimumQuality: Int, maximumQuality: Int, qualityStep: Int, blockSize: Int, disagreementThreshold: Int) {
+            self.enabled = enabled
+            self.minimumQuality = minimumQuality
+            self.maximumQuality = maximumQuality
+            self.qualityStep = qualityStep
+            self.blockSize = blockSize
+            self.disagreementThreshold = disagreementThreshold
+        }
+
+        /// Standalone defaults, for the same reason as `TilingConfig.default`.
+        public static let `default` = JPEGGhostConfig(enabled: true, minimumQuality: 50, maximumQuality: 100, qualityStep: 5, blockSize: 32, disagreementThreshold: 10)
+    }
+
     /// Settings for the tiling layer (see `Sources/ForensicLens/Tiling`)
     /// that splits a large image into overlapping tiles before handing it
     /// to the analyzers above, rather than processing the whole decoded
@@ -351,8 +391,9 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public var tiling: TilingConfig
     public var prnu: PRNUConfig
     public var cfa: CFAConfig
+    public var jpegGhost: JPEGGhostConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
@@ -360,6 +401,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         self.tiling = tiling
         self.prnu = prnu
         self.cfa = cfa
+        self.jpegGhost = jpegGhost
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -402,6 +444,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         ),
         tiling: TilingConfig.default,
         prnu: PRNUConfig.default,
-        cfa: CFAConfig.default
+        cfa: CFAConfig.default,
+        jpegGhost: JPEGGhostConfig.default
     )
 }
