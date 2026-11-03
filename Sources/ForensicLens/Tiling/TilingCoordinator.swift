@@ -67,6 +67,9 @@ enum TilingCoordinator {
     /// Runs `analyzer` against `image`, using `tiles` if non-nil or as a
     /// single block otherwise.
     ///
+    /// EXIF thumbnail consistency, like metadata, works from the file's raw
+    /// bytes and has nothing to tile.
+    ///
     /// Metadata always runs as a single block even when `tiles` is
     /// non-nil: it reads EXIF once from `image.rawBytes`, has no spatial
     /// component, and gains nothing from tiling -- see `MetadataAnalyzer`'s
@@ -93,7 +96,7 @@ enum TilingCoordinator {
         }
 
         switch analyzer.identifier {
-        case "metadata", "prnu", "cfa", "jpegghost":
+        case "metadata", "prnu", "cfa", "jpegghost", "thumbnail":
             return try analyzer.analyze(image, config: config)
         case "clone":
             return try TiledCloneDetection.run(image: image, config: config)

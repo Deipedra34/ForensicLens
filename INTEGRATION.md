@@ -27,7 +27,7 @@ on:
 
 jobs:
   forensiclens:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Scan changed images with ForensicLens
         uses: Deipedra34/ForensicLens@v1.9.0
@@ -73,7 +73,7 @@ By default the action scans only the image files **added or modified** by the cu
 
 ### Runners and caching
 
-The action runs on **Linux and macOS** runners (`ubuntu-latest`, `macos-latest`). It is a composite action, not a Docker action. It builds `forensiclens-cli` from the action's own source and downloads no prebuilt binaries.
+The action runs on **Linux and macOS** runners (`ubuntu-24.04`, `macos-latest`). Use `ubuntu-24.04` rather than `ubuntu-latest` for now: `ubuntu-latest` moved to Ubuntu 26 in October 2026, and the `swift-actions/setup-swift` step the action uses to install Swift on Linux can't handle that image yet ([setup-swift#805](https://github.com/swift-actions/setup-swift/issues/805)). It is a composite action, not a Docker action. It builds `forensiclens-cli` from the action's own source and downloads no prebuilt binaries.
 
 The built binary is cached with `actions/cache`. The cache key covers the runner OS and architecture, the Swift version, and a hash of the action's `Package.swift`, `Package.resolved` (if present) and `Sources/`. After the first run, later runs restore the binary and skip both the Swift toolchain setup and the build. On Linux, the Swift runtime is linked statically so the cached binary runs without a toolchain.
 
@@ -104,6 +104,6 @@ The hook uses pre-commit's `swift` language support. pre-commit builds ForensicL
 
 The integrations analyze exactly what the CLI analyzes. See [Image format support](README.md#image-format-support) in the README. Currently:
 
-- **JPEG** files get metadata (EXIF) analysis. Their pixels aren't decoded yet, so pixel-based analyzers (error level analysis, clone detection, double compression, PRNU sensor noise, CFA demosaicing, JPEG ghosts) don't contribute to their score.
+- **JPEG** files get metadata (EXIF) analysis and the EXIF thumbnail consistency check. Their pixels aren't decoded yet, so pixel-based analyzers (error level analysis, clone detection, double compression, PRNU sensor noise, CFA demosaicing, JPEG ghosts) don't contribute to their score.
 - **PNG** files aren't decoded yet. They're reported as skipped and never fail the check.
 - **BMP and PPM/PGM** files get every analyzer. Add them with `extensions` in the action, or `args: [--extensions, "bmp,ppm,jpg,jpeg,png"]` in the hook along with matching `types_or`/`files` filters.

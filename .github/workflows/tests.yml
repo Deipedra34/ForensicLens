@@ -13,7 +13,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        # Linux is pinned to ubuntu-24.04: ubuntu-latest moved to Ubuntu 26 in
+        # October 2026, which swift-actions/setup-swift can't install Swift on
+        # yet (it fails with "Unexpected error, unable to continue"; see
+        # swift-actions/setup-swift#805). Move back once that's fixed.
+        os: [macos-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository

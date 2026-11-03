@@ -109,7 +109,7 @@ const inSplice = (x, y) => x >= 128 && x < 192 && y >= 64 && y < 128;
 
 const analyzers = await lens.analyzers();
 check(
-  JSON.stringify(analyzers.map((a) => a.id)) === JSON.stringify(["ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost"]),
+  JSON.stringify(analyzers.map((a) => a.id)) === JSON.stringify(["ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost", "thumbnail"]),
   "lists every analyzer in run order",
   analyzers.map((a) => a.id).join(", ")
 );

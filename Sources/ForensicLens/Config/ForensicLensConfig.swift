@@ -322,6 +322,28 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         public static let `default` = JPEGGhostConfig(enabled: true, minimumQuality: 50, maximumQuality: 100, qualityStep: 5, blockSize: 32, disagreementThreshold: 10)
     }
 
+    /// Settings for `ThumbnailConsistencyAnalyzer`.
+    public struct ThumbnailConfig: Codable, Equatable, Sendable {
+        /// Whether EXIF thumbnail consistency checking runs as part of a
+        /// combined report.
+        public var enabled: Bool
+
+        /// A thumbnail whose similarity to the main image (the lower of the
+        /// global and worst-grid-cell correlation, -1...1) falls below this
+        /// is reported as a content mismatch. Unedited images measure around
+        /// 0.94 or higher; a region replaced in the main image drops its
+        /// cell well below 0.5. Higher is more sensitive.
+        public var similarityThreshold: Double
+
+        public init(enabled: Bool, similarityThreshold: Double) {
+            self.enabled = enabled
+            self.similarityThreshold = similarityThreshold
+        }
+
+        /// Standalone defaults, for the same reason as `TilingConfig.default`.
+        public static let `default` = ThumbnailConfig(enabled: true, similarityThreshold: 0.7)
+    }
+
     /// Settings for the tiling layer (see `Sources/ForensicLens/Tiling`)
     /// that splits a large image into overlapping tiles before handing it
     /// to the analyzers above, rather than processing the whole decoded
@@ -392,8 +414,9 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public var prnu: PRNUConfig
     public var cfa: CFAConfig
     public var jpegGhost: JPEGGhostConfig
+    public var thumbnail: ThumbnailConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default, thumbnail: ThumbnailConfig = ThumbnailConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
@@ -402,6 +425,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         self.prnu = prnu
         self.cfa = cfa
         self.jpegGhost = jpegGhost
+        self.thumbnail = thumbnail
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -445,6 +469,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         tiling: TilingConfig.default,
         prnu: PRNUConfig.default,
         cfa: CFAConfig.default,
-        jpegGhost: JPEGGhostConfig.default
+        jpegGhost: JPEGGhostConfig.default,
+        thumbnail: ThumbnailConfig.default
     )
 }

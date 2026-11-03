@@ -76,6 +76,23 @@ The pipeline is split into small, separately tested pieces. `PRNUPlane` is a `Do
 
 The image counts as having a compression history when at least half of the measurable blocks (largest difference at least 0.5 squared gray levels) show a ghost. The dominant quality is the most common block ghost quality, with ties going to the lower quality. Only luminance is swept: a real JPEG quantizes it with the standard IJG luminance table the simulator uses, at full resolution, and it costs a third of sweeping three channels.
 
+## EXIF thumbnail consistency (`Sources/ForensicLens/Analyzers/Thumbnail`, `Sources/ImageDecoding/BaselineJPEGDecoder.swift`)
+
+`ExifReader` now follows IFD0's next-IFD link to IFD1 and reads `Compression`, `JPEGInterchangeFormat`, and `JPEGInterchangeFormatLength`, bounds-checked against the file. `ThumbnailSimilarity` holds the pure comparison (area resampling, letterbox trimming, aspect ratio, NCC), and `ThumbnailConsistencyAnalyzer` does decoding, gating, and scoring.
+
+**Decoder.** Neither image could be decoded before: the package had no JPEG pixel decoder, and EXIF thumbnails are themselves JPEGs. `BaselineJPEGDecoder` is a straightforward T.81 sequential decoder. It parses markers, uses canonical Huffman decoding (maxcode/valptr tables, Annex F.2.2.3), DC prediction, run-length AC with EOB/ZRL, restart markers, dequantization, a separable float IDCT, nearest-neighbor chroma upsampling, and JFIF YCbCr-to-RGB. Anything it doesn't support throws instead of guessing. So does any truncation, including a marker turning up inside entropy-coded data before every MCU is decoded: a half-decoded thumbnail would otherwise read as a mismatch. It was prototyped in Python and cross-checked against GDI+ in both directions (GDI+-encoded files decoded by this decoder, and test-encoder files decoded by GDI+). Mean differences from GDI+'s own decode were 0.4 (4:4:4), 0.01 (grayscale), and 3.7 (4:2:0) gray levels. The 4:2:0 gap is entirely GDI+'s smoothed chroma upsampling: both decoders were equally far from the source image (4.5). The 1/8-scale DC path matched GDI+ block-mean luminance within 0.2 on average. It's wired only into the thumbnail check, deliberately, so the other analyzers' JPEG behavior doesn't change.
+
+**Thresholds** (512x384 synthetic scene, 64x48 quality-75 thumbnail, quality-90 main image):
+
+| Main image | Global NCC | Worst of 16 cells |
+|---|---|---|
+| unedited | 0.98 | 0.94 |
+| 128px object pasted (6% of area) | 0.94 | 0.11 |
+| 64px object (1.6%) | 0.97 | 0.47 |
+| 32px object (0.4%) | 0.98 | 0.90 |
+
+Global correlation alone is useless for local edits; the worst cell carries the signal. The default threshold of 0.7 sits between unedited images (0.91 to 0.96 across the test geometries) and a cell-sized edit. Letterbox bars are trimmed while a row or column has mean luminance at most 20 and standard deviation at most 8, at most a quarter per side. The first version used 16 and 4, until JPEG ringing next to the content edge was measured at up to 5.2 on bar rows, enough to keep real bars and report a false crop.
+
 ## Combining scores (`Sources/ForensicLens/Scoring/SuspicionScorer.swift`)
 
 `SuspicionScorer` takes the strongest single analyzer score as the dominant signal and lets the other two add a smaller, capped amount on top when they back it up, rather than just averaging all three. A plain average would let one unambiguous finding (say, a 95 on clone detection) get diluted by two analyzers that simply had nothing to say about a small, EXIF-less BMP — and that's not really how a human reviewer would weigh the same pile of evidence anyway.

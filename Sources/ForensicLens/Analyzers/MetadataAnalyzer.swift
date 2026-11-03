@@ -326,13 +326,31 @@ struct ExifSummary {
     /// `GPSAltitudeRef`: `0` = above sea level, `1` = below. Any other raw
     /// byte value is non-conformant.
     var gpsAltitudeRef: UInt8?
+
+    /// The embedded thumbnail described by IFD1, if the file has one. Read
+    /// for `ThumbnailConsistencyAnalyzer`.
+    var thumbnail: ExifThumbnail?
+}
+
+/// The thumbnail IFD1 describes: how it's stored, and its bytes when it's
+/// a JPEG stream that lies inside the file.
+struct ExifThumbnail: Equatable {
+    /// IFD1 `Compression`: 6 means JPEG, by far the most common; 1 means
+    /// uncompressed TIFF strips. `nil` if the tag is missing.
+    let compression: Int?
+
+    /// The thumbnail's JPEG stream (`JPEGInterchangeFormat`, of
+    /// `JPEGInterchangeFormatLength` bytes), or `nil` if IFD1 doesn't point
+    /// at one or the pointer runs past the end of the file.
+    let jpegData: [UInt8]?
 }
 
 /// A minimal TIFF/EXIF reader.
 ///
 /// This reads just enough of the TIFF structure embedded in a JPEG's APP1
 /// segment to pull out a handful of well-known tags: Make, Model, Software,
-/// and the three EXIF timestamps. It's not a general-purpose EXIF library.
+/// the three EXIF timestamps, a few GPS fields, and where IFD1 keeps the
+/// embedded thumbnail. It's not a general-purpose EXIF library.
 /// It doesn't walk every IFD, doesn't handle every TIFF data type, and
 /// gives up cleanly (returns `nil`) on anything it doesn't recognize
 /// instead of guessing. That scope matches what this tool actually needs —
@@ -412,7 +430,7 @@ enum ExifReader {
 
         var summary = ExifSummary()
 
-        func readIFD(at offset: Int) -> (exifSubIFDOffset: UInt32?, gpsIFDOffset: UInt32?)? {
+        func readIFD(at offset: Int) -> (exifSubIFDOffset: UInt32?, gpsIFDOffset: UInt32?, nextIFDOffset: UInt32?)? {
             let ifdOffset = tiffStart + offset
             guard let entryCount = u16(ifdOffset) else { return nil }
             var exifSubIFDOffset: UInt32?
@@ -453,7 +471,9 @@ enum ExifReader {
                     continue
                 }
             }
-            return (exifSubIFDOffset, gpsIFDOffset)
+            // The four bytes after the last entry link to the next IFD; in
+            // IFD0 that's IFD1, the thumbnail's.
+            return (exifSubIFDOffset, gpsIFDOffset, u32(ifdOffset + 2 + Int(entryCount) * 12))
         }
 
         if let pointers = readIFD(at: Int(ifd0OffsetRaw)) {
@@ -463,9 +483,46 @@ enum ExifReader {
             if let gpsIFDOffset = pointers.gpsIFDOffset {
                 readGPSIFD(data, tiffStart: tiffStart, offset: Int(gpsIFDOffset), littleEndian: littleEndian, into: &summary)
             }
+            if let ifd1Offset = pointers.nextIFDOffset, ifd1Offset != 0 {
+                summary.thumbnail = readThumbnailIFD(data, tiffStart: tiffStart, offset: Int(ifd1Offset), u16: u16, u32: u32)
+            }
         }
 
         return summary
+    }
+
+    /// Reads IFD1's thumbnail tags: `Compression` (0x0103),
+    /// `JPEGInterchangeFormat` (0x0201, an offset from the TIFF header) and
+    /// `JPEGInterchangeFormatLength` (0x0202). Returns `nil` if IFD1 can't be
+    /// read or has none of them.
+    private static func readThumbnailIFD(_ data: [UInt8], tiffStart: Int, offset: Int, u16: (Int) -> UInt16?, u32: (Int) -> UInt32?) -> ExifThumbnail? {
+        let ifdOffset = tiffStart + offset
+        guard offset > 0, let entryCount = u16(ifdOffset) else { return nil }
+        var compression: Int?
+        var jpegOffset: Int?
+        var jpegLength: Int?
+        for i in 0..<Int(entryCount) {
+            let entryOffset = ifdOffset + 2 + i * 12
+            guard entryOffset + 12 <= data.count, let tag = u16(entryOffset), let type = u16(entryOffset + 2) else { continue }
+            // SHORT values sit in the first two bytes of the value field; LONGs fill it.
+            let value: Int? = type == 3 ? u16(entryOffset + 8).map(Int.init) : (type == 4 ? u32(entryOffset + 8).map(Int.init) : nil)
+            switch tag {
+            case 0x0103: compression = value
+            case 0x0201: jpegOffset = value
+            case 0x0202: jpegLength = value
+            default: continue
+            }
+        }
+        guard compression != nil || jpegOffset != nil else { return nil }
+
+        var jpegData: [UInt8]?
+        if let jpegOffset, let jpegLength, jpegLength > 0 {
+            let start = tiffStart + jpegOffset
+            if start >= 0, start + jpegLength <= data.count {
+                jpegData = Array(data[start..<(start + jpegLength)])
+            }
+        }
+        return ExifThumbnail(compression: compression, jpegData: jpegData)
     }
 
     private static func readSubIFD(_ data: [UInt8], tiffStart: Int, offset: Int, littleEndian: Bool, into summary: inout ExifSummary) {

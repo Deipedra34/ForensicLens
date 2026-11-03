@@ -246,3 +246,16 @@ jpegGhost:
   # How many quality points a block's ghost must differ from the image's
   # dominant ghost to be flagged.
   disagreementThreshold: 10
+
+thumbnail:
+  # Whether to compare a JPEG's embedded EXIF thumbnail with the main image.
+  # Cameras generate the thumbnail once, at capture; an edit that keeps the
+  # old EXIF block leaves a thumbnail that no longer matches. Files with no
+  # embedded thumbnail (and non-JPEG files) are reported as not applicable.
+  enabled: true
+
+  # A thumbnail whose similarity to the main image (the lower of the whole-
+  # image and worst 4x4-cell correlation, -1 to 1) falls below this is
+  # reported as a content mismatch. Unedited images measure ~0.94 or more.
+  # A different aspect ratio is reported separately, whatever this is set to.
+  similarityThreshold: 0.7

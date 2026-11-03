@@ -360,6 +360,27 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    // MARK: - EXIF thumbnail
+
+    func testThumbnailCheckIsOnByDefault() {
+        XCTAssertEqual(ForensicLensConfig.default.thumbnail, ForensicLensConfig.ThumbnailConfig(enabled: true, similarityThreshold: 0.7))
+    }
+
+    func testParsingThumbnailSection() throws {
+        let config = try ConfigLoader.parse("thumbnail:\n  enabled: false\n  similarityThreshold: 0.8")
+        XCTAssertEqual(config.thumbnail, ForensicLensConfig.ThumbnailConfig(enabled: false, similarityThreshold: 0.8))
+        XCTAssertEqual(config.jpegGhost, ForensicLensConfig.default.jpegGhost, "other sections keep their defaults")
+    }
+
+    func testThumbnailInvalidValueAndUnknownKeyThrow() {
+        XCTAssertThrowsError(try ConfigLoader.parse("thumbnail:\n  similarityThreshold: high")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "similarityThreshold", value: "high"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("thumbnail:\n  aspectTolerance: 0.1")) { error in
+            XCTAssertEqual(error as? ConfigError, .unknownKey(section: "thumbnail", key: "aspectTolerance"))
+        }
+    }
+
     func testPRNUInvalidValueAndUnknownKeyThrow() {
         XCTAssertThrowsError(try ConfigLoader.parse("prnu:\n  correlationThreshold: high")) { error in
             XCTAssertEqual(error as? ConfigError, .invalidValue(key: "correlationThreshold", value: "high"))

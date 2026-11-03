@@ -56,7 +56,7 @@ enum CLI {
             switch command {
             case "report":
                 only = nil
-            case "ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost":
+            case "ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost", "thumbnail":
                 only = [command]
             default:
                 eprint("Error: unknown command \"\(command)\".")
@@ -463,10 +463,11 @@ enum CLI {
           prnu                Run only PRNU sensor-noise analysis.
           cfa                 Run only CFA demosaicing consistency analysis.
           jpegghost           Run only JPEG ghost detection.
+          thumbnail           Run only the EXIF thumbnail consistency check.
           batch               Scan directories and/or image files and print one summary report.
           help                Show this message.
 
-        OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost):
+        OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail):
           --json           Print the report as JSON instead of plain text.
           --html-report <path>
                            Also write a self-contained HTML report to <path>:
@@ -533,6 +534,7 @@ enum CLI {
           forensiclens-cli prnu photo.ppm --reference camera-reference/
           forensiclens-cli cfa photo.ppm
           forensiclens-cli jpegghost photo-from-jpeg.bmp
+          forensiclens-cli thumbnail camera-photo.jpg
           forensiclens-cli batch photos/
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json

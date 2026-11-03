@@ -119,6 +119,8 @@ public enum ConfigLoader {
             try applyCFA(key: key, value: value, to: &config.cfa)
         case "jpegGhost":
             try applyJPEGGhost(key: key, value: value, to: &config.jpegGhost)
+        case "thumbnail":
+            try applyThumbnail(key: key, value: value, to: &config.thumbnail)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -267,6 +269,17 @@ public enum ConfigLoader {
             ghost.disagreementThreshold = try parseInt(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "jpegGhost", key: key)
+        }
+    }
+
+    private static func applyThumbnail(key: String, value: String, to thumbnail: inout ForensicLensConfig.ThumbnailConfig) throws {
+        switch key {
+        case "enabled":
+            thumbnail.enabled = try parseBool(key: key, value: value)
+        case "similarityThreshold":
+            thumbnail.similarityThreshold = try parseDouble(key: key, value: value)
+        default:
+            throw ConfigError.unknownKey(section: "thumbnail", key: key)
         }
     }
 

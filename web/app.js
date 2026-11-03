@@ -14,6 +14,7 @@ const layerColors = {
   prnu: "#2f9e44",
   cfa: "#e64980",
   jpegghost: "#1098ad",
+  thumbnail: "#5c7cfa",
 };
 const fallbackColor = "#868e96";
 

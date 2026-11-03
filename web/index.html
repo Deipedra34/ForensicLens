@@ -26,7 +26,7 @@
   <section class="card" id="input-card">
     <div id="drop-zone" class="drop-zone" tabindex="0">
       <p><strong>Drop an image here</strong> or <label class="link" for="file-input">choose a file</label>.</p>
-      <p class="muted">BMP and PPM/PGM get every analyzer. JPEG gets metadata analysis only, since its pixels aren't decoded yet.</p>
+      <p class="muted">BMP and PPM/PGM get every pixel analyzer. JPEG gets metadata and EXIF thumbnail checks; the other analyzers don't decode JPEG pixels yet.</p>
       <input type="file" id="file-input" accept=".bmp,.ppm,.pgm,.pnm,.jpg,.jpeg,image/bmp,image/jpeg,image/x-portable-anymap" hidden>
       <button type="button" id="sample-button" class="secondary">Try a sample (copy-move forgery)</button>
     </div>
