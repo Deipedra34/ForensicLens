@@ -122,8 +122,9 @@ extension Fixtures {
         withMarker ? bigEndian32(6) + Array("Exif\0\0".utf8) + tiff : bigEndian32(0) + tiff
     }
 
-    /// An EXIF (TIFF) block with a camera Make and Model and, if given, a
-    /// Software tag.
+    /// An EXIF (TIFF) block like a phone camera's: Make and Model, a GPS
+    /// block (camera info without GPS, or the reverse, reads as partial
+    /// stripping), and, if given, a Software tag.
     static func cameraExifTIFF(make: String = "TestCam", software: String? = nil) -> [UInt8] {
         var fields = [
             ExifFixtureBuilder.Field(tag: 0x010F, value: .ascii(make)),
@@ -132,7 +133,8 @@ extension Fixtures {
         if let software {
             fields.append(ExifFixtureBuilder.Field(tag: 0x0131, value: .ascii(software)))
         }
-        return ExifFixtureBuilder.build(ifd0Fields: fields, subIFDFields: [])
+        return ExifFixtureBuilder.build(ifd0Fields: fields, subIFDFields: [],
+                                        gpsIFDFields: [ExifFixtureBuilder.Field(tag: 0x0001, value: .ascii("N"))])
     }
 
     static func isoBox(_ type: String, _ content: [UInt8]) -> [UInt8] {
