@@ -43,6 +43,27 @@ public enum ImageFormat: String, Sendable, CaseIterable {
         return nil
     }
 
+    /// The format's usual name, for messages: "JPEG", "HEIF", "WebP", ...
+    public var displayName: String {
+        switch self {
+        case .bmp: return "BMP"
+        case .ppm: return "PPM"
+        case .pgm: return "PGM"
+        case .jpeg: return "JPEG"
+        case .heif: return "HEIF"
+        case .webp: return "WebP"
+        }
+    }
+
+    /// Whether files in this format can carry EXIF metadata: in a JPEG
+    /// `APP1` segment, a HEIF `Exif` item, or a WebP `EXIF` chunk.
+    public var canCarryEXIF: Bool {
+        switch self {
+        case .jpeg, .heif, .webp: return true
+        case .bmp, .ppm, .pgm: return false
+        }
+    }
+
     /// A RIFF container (`"RIFF" <size> "WEBP"`).
     private static func isWebP(_ data: [UInt8]) -> Bool {
         data.count >= 12

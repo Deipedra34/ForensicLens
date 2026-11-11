@@ -1,17 +1,19 @@
 import Foundation
 import ImageDecoding
 
-/// Compares the thumbnail embedded in a JPEG's EXIF data with the main
-/// image. Cameras and phones generate that thumbnail once, at capture. An
+/// Compares the thumbnail embedded in an image's EXIF data with the main
+/// image. That's usually a JPEG, but HEIF and WebP files can carry the same
+/// EXIF block, thumbnail included, and are checked the same way. Cameras and phones generate that thumbnail once, at capture. An
 /// editor that changes the main image but carries the old EXIF block along
 /// unchanged leaves a thumbnail that no longer matches, and so does a file
 /// assembled from two sources.
 ///
 /// The thumbnail comes from IFD1 via the same `ExifReader` metadata
-/// analysis uses. Both images are decoded with `BaselineJPEGDecoder`
-/// (luminance only), the main one at 1/8 scale whenever that's still at
-/// least as large as the thumbnail, which skips nearly all of the decoding
-/// work. Black letterbox bars in the thumbnail are trimmed. The main image
+/// analysis uses, and is decoded with `BaselineJPEGDecoder` (luminance
+/// only). A JPEG main image is decoded the same way, at 1/8 scale whenever
+/// that's still at least as large as the thumbnail, which skips nearly all
+/// of the decoding work; a HEIF or WebP main image is already decoded, and
+/// its pixels are used directly. Black letterbox bars in the thumbnail are trimmed. The main image
 /// is resampled to the thumbnail's content size, and `ThumbnailSimilarity`
 /// scores the pair. Two separately labeled signals come out of it:
 ///
@@ -30,8 +32,10 @@ import ImageDecoding
 /// report.
 ///
 /// **Not applicable** (score 0, with the reason in the summary) when the
-/// file isn't a JPEG, has no EXIF data, or has no embedded thumbnail (common:
-/// many tools strip it). Also when the thumbnail is uncompressed TIFF data
+/// file isn't a JPEG, HEIF, or WebP file, has no EXIF data, or has no
+/// embedded EXIF thumbnail (common: many tools strip it, and HEIF files
+/// usually store their thumbnail as a separate HEVC image instead, which
+/// this check doesn't read). Also when the thumbnail is uncompressed TIFF data
 /// (rare, unsupported), corrupt or truncated, either image can't be decoded
 /// (e.g. a progressive JPEG), or both images are featureless.
 ///
@@ -65,8 +69,8 @@ public struct ThumbnailConsistencyAnalyzer: Analyzer {
             AnalyzerFinding.clean(analyzerID: identifier, summary: "\(reason) EXIF thumbnail consistency is not applicable.")
         }
 
-        guard image.format == .jpeg else {
-            return notApplicable("Only JPEG files carry an EXIF thumbnail, and this is a \(image.format?.rawValue.uppercased() ?? "non-JPEG") file.")
+        guard let format = image.format, format.canCarryEXIF else {
+            return notApplicable("Only JPEG files (and HEIF or WebP files with EXIF metadata) carry an EXIF thumbnail, and this is a \(image.format?.displayName ?? "non-JPEG") file.")
         }
         guard let exif = ExifReader.read(from: image.rawBytes) else {
             return notApplicable("The file has no EXIF data.")

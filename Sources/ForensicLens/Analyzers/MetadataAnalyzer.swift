@@ -16,11 +16,12 @@ import ImageDecoding
 /// verdict.
 ///
 /// One thing worth calling out: this reads `rawBytes`, not `pixels`. EXIF
-/// lives in a JPEG's `APP1` marker segment, which sits in the file header
-/// before the compressed image scan even starts, so reading it doesn't
-/// require decoding a single pixel. That's what lets this analyzer work
-/// fine even on JPEGs whose pixel data ForensicLens can't decode (see
-/// `ImageData`'s doc comment for more on that split).
+/// lives in a JPEG's `APP1` marker segment, a HEIF file's `Exif` item, or a
+/// WebP file's `EXIF` chunk -- all outside the compressed image data -- so
+/// reading it doesn't require decoding a single pixel. That's what lets this
+/// analyzer work fine even on JPEGs whose pixel data ForensicLens can't
+/// decode (see `ImageData`'s doc comment for more on that split). All three
+/// containers go through the same `ExifReader`.
 public struct MetadataAnalyzer: Analyzer {
     public let identifier = "metadata"
     public let displayName = "EXIF / Metadata Analysis"
@@ -28,7 +29,7 @@ public struct MetadataAnalyzer: Analyzer {
     public init() {}
 
     public func analyze(_ image: ImageData, config: ForensicLensConfig) throws -> AnalyzerFinding {
-        guard image.format == .jpeg else {
+        guard let format = image.format, format.canCarryEXIF else {
             return AnalyzerFinding.clean(
                 analyzerID: identifier,
                 summary: "\(image.format?.rawValue.uppercased() ?? "This") format does not carry EXIF metadata; nothing to analyze."
@@ -36,15 +37,7 @@ public struct MetadataAnalyzer: Analyzer {
         }
 
         guard let exif = ExifReader.read(from: image.rawBytes) else {
-            if config.metadata.flagMissingExif {
-                return AnalyzerFinding(
-                    analyzerID: identifier,
-                    score: 20,
-                    summary: "No EXIF metadata found in a JPEG file.",
-                    indicators: [Indicator(message: "No Exif APP1 segment was found. Camera photos almost always carry one; its absence can indicate the metadata was stripped during editing.", weight: 20)]
-                )
-            }
-            return AnalyzerFinding.clean(analyzerID: identifier, summary: "No EXIF metadata found in this JPEG.")
+            return missingExifFinding(format: format, config: config)
         }
 
         var indicators: [Indicator] = []
@@ -294,6 +287,45 @@ enum MetadataAnomaly {
     }
 }
 
+extension MetadataAnalyzer {
+    /// The finding for a file that can carry EXIF but doesn't. Camera
+    /// originals in JPEG or HEIF (every iPhone HEIC capture) virtually always
+    /// have EXIF, so its absence there is flagged (if configured). WebP is
+    /// different: most WebP files are web exports whose encoder never wrote
+    /// EXIF, so a missing block says nothing about editing.
+    fileprivate func missingExifFinding(format: ImageFormat, config: ForensicLensConfig) -> AnalyzerFinding {
+        let missing: (summary: String, indicator: String, clean: String)
+        switch format {
+        case .heif:
+            missing = (
+                "No EXIF metadata found in a HEIF file.",
+                "No Exif metadata item was found. Camera photos (including iPhone HEIC captures) almost always carry one; its absence can indicate the metadata was stripped during editing.",
+                "No EXIF metadata found in this HEIF file."
+            )
+        case .webp:
+            return AnalyzerFinding.clean(
+                analyzerID: identifier,
+                summary: "No EXIF metadata found in this WebP file. Most WebP files carry none (web encoders rarely write it), so its absence isn't treated as suspicious."
+            )
+        default:
+            missing = (
+                "No EXIF metadata found in a JPEG file.",
+                "No Exif APP1 segment was found. Camera photos almost always carry one; its absence can indicate the metadata was stripped during editing.",
+                "No EXIF metadata found in this JPEG."
+            )
+        }
+        guard config.metadata.flagMissingExif else {
+            return AnalyzerFinding.clean(analyzerID: identifier, summary: missing.clean)
+        }
+        return AnalyzerFinding(
+            analyzerID: identifier,
+            score: 20,
+            summary: missing.summary,
+            indicators: [Indicator(message: missing.indicator, weight: 20)]
+        )
+    }
+}
+
 /// The handful of EXIF fields `MetadataAnalyzer` cares about.
 struct ExifSummary {
     var make: String?
@@ -348,7 +380,8 @@ struct ExifThumbnail: Equatable {
 /// A minimal TIFF/EXIF reader.
 ///
 /// This reads just enough of the TIFF structure embedded in a JPEG's APP1
-/// segment to pull out a handful of well-known tags: Make, Model, Software,
+/// segment (or, located by `ContainerMetadata`, a HEIF `Exif` item or a
+/// WebP `EXIF` chunk) to pull out a handful of well-known tags: Make, Model, Software,
 /// the three EXIF timestamps, a few GPS fields, and where IFD1 keeps the
 /// embedded thumbnail. It's not a general-purpose EXIF library.
 /// It doesn't walk every IFD, doesn't handle every TIFF data type, and
@@ -359,10 +392,14 @@ struct ExifThumbnail: Equatable {
 enum ExifReader {
     private static let exifPreamble: [UInt8] = Array("Exif\0\0".utf8)
 
-    /// Locates the APP1/Exif segment in a JPEG's byte stream, parses its
-    /// TIFF structure, and extracts the tags `ExifSummary` cares about.
-    /// Returns `nil` if no Exif segment is present or it's malformed.
+    /// Locates the EXIF block in a JPEG (its APP1/Exif segment), HEIF, or
+    /// WebP file, parses its TIFF structure, and extracts the tags
+    /// `ExifSummary` cares about. Returns `nil` if no EXIF block is present
+    /// or it's malformed.
     static func read(from data: [UInt8]) -> ExifSummary? {
+        if let tiff = ContainerMetadata.exifTIFF(in: data) {
+            return parseTIFF(tiff, tiffStart: 0)
+        }
         guard let tiffStart = locateTIFFHeader(in: data) else { return nil }
         return parseTIFF(data, tiffStart: tiffStart)
     }
