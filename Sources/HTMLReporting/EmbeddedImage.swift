@@ -4,7 +4,7 @@ import ImageDecoding
 /// The analyzed image, prepared for embedding directly in an HTML report
 /// as a base64 `data:` URI.
 ///
-/// Wherever a browser can display the original file as-is (BMP, JPEG),
+/// Wherever a browser can display the original file as-is (BMP, JPEG, WebP),
 /// the original bytes are embedded untouched -- no decode/re-encode round
 /// trip, and the report shows exactly the file that was analyzed. PPM/PGM
 /// are the exception: no browser renders them, so those are re-encoded
@@ -41,6 +41,8 @@ public struct EmbeddedImage: Sendable, Equatable {
             return EmbeddedImage(mimeType: "image/bmp", bytes: image.rawBytes, width: width, height: height)
         case .jpeg?:
             return EmbeddedImage(mimeType: "image/jpeg", bytes: image.rawBytes, width: width, height: height)
+        case .webp?:
+            return EmbeddedImage(mimeType: "image/webp", bytes: image.rawBytes, width: width, height: height)
         case .ppm?, .pgm?, .heif?, nil:
             guard let pixels = image.pixels else { return nil }
             return EmbeddedImage(mimeType: "image/bmp", bytes: ImageEncoder.encodeBMP(pixels), width: pixels.width, height: pixels.height)

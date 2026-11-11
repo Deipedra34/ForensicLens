@@ -39,6 +39,8 @@ public enum ImageDecoder {
             return JPEGStubDecoder()
         case .heif:
             return HEIFDecoder()
+        case .webp:
+            return WebPDecoder()
         }
     }
 }

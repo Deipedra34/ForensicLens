@@ -6,8 +6,8 @@
 /// get a clear, typed error (`ImageDecodingError.notImplemented`) and a
 /// metadata-only analysis instead of a confusing parse failure; see
 /// `ELAAnalyzer` for how Error Level Analysis works around not having a real
-/// JPEG decoder. HEIF/HEIC is decoded by libheif, loaded at run time (see
-/// `CodecLibrary`).
+/// JPEG decoder. HEIF/HEIC and WebP are decoded by libheif and libwebp,
+/// loaded at run time (see `CodecLibrary`).
 public enum ImageFormat: String, Sendable, CaseIterable {
     case bmp
     case ppm
@@ -15,6 +15,8 @@ public enum ImageFormat: String, Sendable, CaseIterable {
     case jpeg
     /// HEIF and HEIC (HEVC-coded HEIF, the iPhone camera default).
     case heif
+    /// WebP, lossy (VP8) or lossless (VP8L).
+    case webp
 
     /// Sniffs the format of `data` by inspecting its leading magic bytes.
     ///
@@ -35,7 +37,17 @@ public enum ImageFormat: String, Sendable, CaseIterable {
         if isHEIF(data) {
             return .heif
         }
+        if isWebP(data) {
+            return .webp
+        }
         return nil
+    }
+
+    /// A RIFF container (`"RIFF" <size> "WEBP"`).
+    private static func isWebP(_ data: [UInt8]) -> Bool {
+        data.count >= 12
+            && Array(data[0..<4]) == Array("RIFF".utf8)
+            && Array(data[8..<12]) == Array("WEBP".utf8)
     }
 
     /// Brands that mean HEVC-coded HEIF (HEIC) content.
