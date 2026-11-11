@@ -24,26 +24,43 @@ let package = Package(
     targets: [
         // MARK: - C image decoding primitives
         //
-        // All non-Swift code lives in this single target. It exposes a small,
-        // minimal C API for decoding BMP and PPM/PGM pixel data plus a
-        // best-effort baseline JPEG entry point. Nothing outside of
-        // `ImageDecoding` ever imports this module directly, which keeps
-        // every other part of the package free of C types, unsafe pointers,
-        // and platform-specific decoding quirks.
+        // All non-Swift code lives in these two C targets. `CStbImage`
+        // exposes a small, minimal C API for decoding BMP and PPM/PGM pixel
+        // data plus a best-effort baseline JPEG entry point. Nothing outside
+        // of `ImageDecoding` ever imports either module directly, which
+        // keeps every other part of the package free of C types, unsafe
+        // pointers, and platform-specific decoding quirks.
         .target(
             name: "CStbImage",
             path: "Sources/CStbImage",
             publicHeadersPath: "include"
         ),
 
+        // `CImageCodecs` decodes HEIF/HEIC and WebP through libheif and
+        // libwebp, which it opens with dlopen() at run time instead of
+        // linking at build time. The package still builds with nothing but
+        // the Swift toolchain (on every platform, including WebAssembly),
+        // and installing either library later turns its format on without
+        // a rebuild. See README.md, "Supported Formats".
+        .target(
+            name: "CImageCodecs",
+            path: "Sources/CImageCodecs",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                // dlopen()/dlsym() live in libdl on glibc older than 2.34.
+                .linkedLibrary("dl", .when(platforms: [.linux]))
+            ]
+        ),
+
         // MARK: - Swift image decoding boundary
         //
-        // `ImageDecoding` is the ONLY module permitted to `import CStbImage`.
-        // It converts raw C buffers into the pure-Swift `PixelBuffer` value
-        // type and never leaks C types across its public API.
+        // `ImageDecoding` is the ONLY module permitted to `import CStbImage`
+        // or `CImageCodecs`. It converts raw C buffers into the pure-Swift
+        // `PixelBuffer` value type and never leaks C types across its
+        // public API.
         .target(
             name: "ImageDecoding",
-            dependencies: ["CStbImage"],
+            dependencies: ["CStbImage", "CImageCodecs"],
             path: "Sources/ImageDecoding"
         ),
 
