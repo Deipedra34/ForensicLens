@@ -55,6 +55,21 @@ public enum ImageFormat: String, Sendable, CaseIterable {
         }
     }
 
+    /// The file extensions conventionally used for this format, lowercased
+    /// and without the dot. Batch mode and `forensiclens-eval` pick files up
+    /// by these; the format itself is always identified from the file's
+    /// contents, never its name.
+    public var fileExtensions: [String] {
+        switch self {
+        case .bmp: return ["bmp"]
+        case .ppm: return ["ppm"]
+        case .pgm: return ["pgm"]
+        case .jpeg: return ["jpg", "jpeg"]
+        case .heif: return ["heic", "heif", "hif"]
+        case .webp: return ["webp"]
+        }
+    }
+
     /// Whether files in this format can carry EXIF metadata: in a JPEG
     /// `APP1` segment, a HEIF `Exif` item, or a WebP `EXIF` chunk.
     public var canCarryEXIF: Bool {

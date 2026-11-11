@@ -12,6 +12,11 @@ import ImageDecoding
 /// dependencies keeps the whole project buildable offline with nothing
 /// beyond the Swift toolchain itself.
 enum CLI {
+    /// File extensions `batch` picks up when `--extensions` isn't given:
+    /// JPEG and PNG as before, plus HEIF/HEIC and WebP, so phone photos are
+    /// found without any extra flag.
+    static let defaultBatchExtensions: [String] = ["jpg", "jpeg", "png"] + ImageFormat.heif.fileExtensions + ImageFormat.webp.fileExtensions
+
     static func run(arguments: [String]) async -> Int32 {
         guard arguments.count > 1 else {
             printUsage()
@@ -21,6 +26,10 @@ enum CLI {
         let command = arguments[1]
         if command == "--help" || command == "-h" || command == "help" {
             printUsage()
+            return 0
+        }
+        if command == "formats" {
+            print(FormatsCommand.report())
             return 0
         }
 
@@ -120,7 +129,7 @@ enum CLI {
         let recursive = !parsed.flags.contains("--no-recursive")
 
         let extensions = Set(
-            (parsed.options["--extensions"] ?? "jpg,jpeg,png")
+            (parsed.options["--extensions"] ?? defaultBatchExtensions.joined(separator: ","))
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
                 .filter { !$0.isEmpty }
@@ -453,6 +462,7 @@ enum CLI {
         USAGE:
           forensiclens-cli <command> <image-path> [--json] [--config <path>] [--html-report <path>]
           forensiclens-cli batch <directory|file>... [options]
+          forensiclens-cli formats
 
         COMMANDS:
           report              Run every enabled analyzer and print a combined report.
@@ -465,6 +475,8 @@ enum CLI {
           jpegghost           Run only JPEG ghost detection.
           thumbnail           Run only the EXIF thumbnail consistency check.
           batch               Scan directories and/or image files and print one summary report.
+          formats             List the image formats this build handles, and whether the
+                               libheif/libwebp libraries for HEIF/HEIC and WebP were found.
           help                Show this message.
 
         OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail):
@@ -497,7 +509,7 @@ enum CLI {
         OPTIONS (batch):
           --no-recursive        Only scan the top-level directory, skip subdirectories.
           --extensions <list>   Comma-separated list of file extensions to treat as
-                                 images. Defaults to "jpg,jpeg,png".
+                                 images. Defaults to "\(defaultBatchExtensions.joined(separator: ","))".
           --max-concurrency <n> Maximum number of images analyzed at once. Defaults
                                  to the number of available CPU cores.
           --format <fmt>        Report format: text (default), json, or csv.
@@ -524,6 +536,7 @@ enum CLI {
 
         EXAMPLES:
           forensiclens-cli report photo.bmp
+          forensiclens-cli report IMG_0001.HEIC
           forensiclens-cli ela photo.bmp --json
           forensiclens-cli report photo.bmp --html-report photo-report.html
           forensiclens-cli clone photo.ppm --config custom.yaml
@@ -540,6 +553,7 @@ enum CLI {
           forensiclens-cli batch photos/ --format json --output report.json
           forensiclens-cli batch photos/ --html-report-dir reports/ --html-report-threshold 45
           forensiclens-cli batch new-1.jpg new-2.png --fail-threshold 70
+          forensiclens-cli formats
         """)
     }
 }
