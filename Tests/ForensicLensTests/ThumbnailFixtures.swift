@@ -85,11 +85,21 @@ extension Fixtures {
         return TestJPEGEncoder.encode(try PixelBuffer(width: width, height: height, channels: 1, pixels: pixels), quality: 75)
     }
 
-    /// A JPEG file: SOI, an APP1 Exif segment (IFD0 with a camera Make, and
-    /// unless `thumbnail` is `nil`, IFD1 describing the thumbnail), then
-    /// the rest of `mainJPEG`. `thumbnailCompression` 1 writes IFD1 as an
-    /// uncompressed thumbnail with no JPEG pointer.
+    /// A JPEG file: SOI, an APP1 Exif segment holding
+    /// `thumbnailExifTIFF(thumbnail:thumbnailCompression:)`, then the rest of
+    /// `mainJPEG`.
     static func jpegFile(main mainJPEG: [UInt8], thumbnail: [UInt8]?, thumbnailCompression: UInt16 = 6) -> [UInt8] {
+        let payload = Array("Exif\0\0".utf8) + thumbnailExifTIFF(thumbnail: thumbnail, thumbnailCompression: thumbnailCompression)
+        let length = payload.count + 2
+        return [0xFF, 0xD8, 0xFF, 0xE1, UInt8(length >> 8), UInt8(length & 0xFF)] + payload + Array(mainJPEG.dropFirst(2))
+    }
+
+    /// A TIFF-structured EXIF block: IFD0 with a camera Make, and unless
+    /// `thumbnail` is `nil`, IFD1 describing the thumbnail, which follows
+    /// the IFDs. `thumbnailCompression` 1 writes IFD1 as an uncompressed
+    /// thumbnail with no JPEG pointer. The same block goes into the JPEG,
+    /// HEIF, and WebP fixtures.
+    static func thumbnailExifTIFF(thumbnail: [UInt8]?, thumbnailCompression: UInt16 = 6) -> [UInt8] {
         func u16(_ value: UInt16) -> [UInt8] { [UInt8(value & 0xFF), UInt8(value >> 8)] }
         func u32(_ value: UInt32) -> [UInt8] { (0..<4).map { UInt8((value >> (8 * UInt32($0))) & 0xFF) } }
         func entry(_ tag: UInt16, _ type: UInt16, _ count: UInt32, _ value: [UInt8]) -> [UInt8] {
@@ -116,9 +126,6 @@ extension Fixtures {
         }
         tiff += make
         if let thumbnail, thumbnailCompression == 6 { tiff += thumbnail }
-
-        let payload = Array("Exif\0\0".utf8) + tiff
-        let length = payload.count + 2
-        return [0xFF, 0xD8, 0xFF, 0xE1, UInt8(length >> 8), UInt8(length & 0xFF)] + payload + Array(mainJPEG.dropFirst(2))
+        return tiff
     }
 }
