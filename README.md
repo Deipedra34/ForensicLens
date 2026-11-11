@@ -13,7 +13,7 @@
 
 A Swift library and CLI for spotting signs of digital manipulation in still images. It runs eight independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, double JPEG compression detection, PRNU sensor-noise analysis, CFA demosaicing consistency, JPEG ghost detection, and EXIF thumbnail consistency) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
 
-Pure Swift and C, no Apple-only frameworks. Builds and tests on macOS and Linux.
+Pure Swift and C, no Apple-only frameworks. Builds and tests on macOS and Linux. Reads BMP and PPM/PGM natively, JPEG metadata, and HEIF/HEIC (the iPhone default) and WebP through libheif and libwebp when they're installed. See [Supported Formats](#supported-formats).
 
 ## Why eight techniques instead of one
 
@@ -121,14 +121,14 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 
 | Analyzer | What it looks for | Needs decoded pixels? | Needs EXIF? |
 |---|---|:---:|:---:|
-| Error Level Analysis | Regions with a compression-error signature inconsistent with the rest of the image | Yes | No |
-| EXIF / Metadata | Editing-software signatures, impossible or drifted timestamps, missing camera fields, cross-field inconsistencies (GPS vs. capture timestamp, GPS vs. camera identity, GPS altitude sign, editing software vs. unedited-camera claim) | No | Yes (JPEG only) |
+| Error Level Analysis | Regions with a compression-error signature inconsistent with the rest of the image | Yes (not applicable to HEIF/WebP) | No |
+| EXIF / Metadata | Editing-software signatures, impossible or drifted timestamps, missing camera fields, cross-field inconsistencies (GPS vs. capture timestamp, GPS vs. camera identity, GPS altitude sign, editing software vs. unedited-camera claim) | No | Yes (JPEG, HEIF, WebP) |
 | Copy-Move (Clone) Detection | Duplicated regions pasted elsewhere in the same image: exact copies via block matching, plus rotated and/or rescaled copies via keypoint matching and RANSAC (reports the recovered rotation and scale) | Yes | No |
-| Double JPEG Compression Detection | A periodic pattern in a DCT coefficient's histogram, left behind when a JPEG is decompressed, edited, and re-compressed a second time | Yes (JPEG only) | No |
+| Double JPEG Compression Detection | A periodic pattern in a DCT coefficient's histogram, left behind when a JPEG is decompressed, edited, and re-compressed a second time | Yes (JPEG only; not applicable to HEIF/WebP) | No |
 | PRNU Sensor Noise Analysis | Blocks whose sensor-noise level or correlation structure doesn't match the rest of the image; optionally, whether the image carries a known camera's PRNU fingerprint (`--reference`) | Yes | No |
 | CFA Demosaicing Consistency | Blocks missing the period-2 Bayer interpolation pattern the rest of the image shows, or carrying it on a shifted grid | Yes (RGB only) | No |
-| JPEG Ghost Detection | Blocks whose JPEG "ghost" (the quality at which re-compression changes them least) differs from the rest of the image's | Yes (JPEG-derived only) | No |
-| EXIF Thumbnail Consistency | An embedded EXIF thumbnail whose content or aspect ratio no longer matches the main image | No (decodes the JPEG itself) | Yes (JPEG with a thumbnail) |
+| JPEG Ghost Detection | Blocks whose JPEG "ghost" (the quality at which re-compression changes them least) differs from the rest of the image's | Yes (JPEG-derived only; not applicable to HEIF/WebP) | No |
+| EXIF Thumbnail Consistency | An embedded EXIF thumbnail whose content or aspect ratio no longer matches the main image | No for JPEG (decodes it itself); yes for HEIF/WebP | Yes (JPEG, HEIF, or WebP with a thumbnail) |
 
 | Capability | Status |
 |---|---|
@@ -141,14 +141,15 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 | CI / pre-commit integration (GitHub Action, pre-commit hook, `--fail-threshold`) | Yes |
 | Cross-platform (macOS / Linux) | Yes |
 | Browser demo (WebAssembly, analysis runs client-side) | Yes, see [Web Demo](#web-demo) |
-| Third-party dependencies | None |
+| HEIF/HEIC and WebP input | Yes, with libheif / libwebp installed (loaded at run time; see [Supported Formats](#supported-formats)) |
+| Third-party dependencies | None to build; libheif and libwebp are optional at run time |
 
 ### HTML visual report
 
 Text and JSON reports say *what* was flagged; the HTML report shows *where*. `--html-report` writes a single `.html` file that opens in any browser, with nothing else to ship alongside it:
 
 - **Suspicion score** and verdict at the top, color-coded by severity.
-- **The analyzed image**, embedded directly in the page as a base64 `data:` URI (BMP and JPEG are embedded byte-for-byte; PPM/PGM, which browsers can't display, are converted to BMP from the already-decoded pixels).
+- **The analyzed image**, embedded directly in the page as a base64 `data:` URI (BMP, JPEG, and WebP are embedded byte-for-byte; PPM/PGM and HEIF/HEIC, which most browsers can't display, are converted to BMP from the already-decoded pixels).
 - **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from, green for PRNU sensor-noise analysis (one box per noise-inconsistent block, plus the analyzed area when an image fails a `--reference` camera check), pink for CFA demosaicing consistency (one box per block whose Bayer pattern is missing or misaligned), teal for JPEG ghost detection (one box per block compressed at a different quality than the rest of the image), and indigo for EXIF thumbnail consistency, one box around the part of the image that differs most from its thumbnail.
 - **A checkbox per analyzer** above the image to show or hide that layer (a few lines of inline JavaScript, no libraries), plus a legend mapping each color to its analyzer.
 - **The full findings breakdown** below the image: analyzer name, score, summary, and every indicator with its region coordinates -- the same information as the text/JSON report.
@@ -180,11 +181,14 @@ swift build -c release
 .build/release/forensiclens-cli report path/to/image.bmp
 ```
 
+**HEIF/HEIC and WebP support** needs libheif and libwebp at run time (not to build). On macOS, `brew install libheif webp`; on Ubuntu 24.04 or newer, `sudo apt install libheif1 libheif-plugin-libde265 libwebp7`. `forensiclens-cli formats` confirms they were found. Other platforms and details: [Supported Formats](#supported-formats).
+
 ## CLI usage
 
 ```
 forensiclens-cli <command> <image-path> [--json] [--config <path>] [--html-report <path>]
 forensiclens-cli batch <directory|file>... [options]
+forensiclens-cli formats
 
 COMMANDS:
   report              Run every enabled analyzer and print a combined report.
@@ -197,6 +201,8 @@ COMMANDS:
   jpegghost           Run only JPEG ghost detection.
   thumbnail           Run only the EXIF thumbnail consistency check.
   batch               Scan directories and/or image files and print one summary report.
+  formats             List the image formats this build handles, and whether the
+                       libheif/libwebp libraries for HEIF/HEIC and WebP were found.
   help                Show usage.
 
 OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail):
@@ -229,7 +235,7 @@ OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpeg
 OPTIONS (batch):
   --no-recursive        Only scan the top-level directory, skip subdirectories.
   --extensions <list>   Comma-separated file extensions to treat as images.
-                         Defaults to "jpg,jpeg,png".
+                         Defaults to "jpg,jpeg,png,heic,heif,hif,webp".
   --max-concurrency <n> Maximum number of images analyzed at once. Defaults
                          to the number of available CPU cores.
   --format <fmt>        Report format: text (default), json, or csv.
@@ -261,6 +267,14 @@ Examples:
 # Full combined report, plain text
 forensiclens-cli report photo.bmp
 
+# An iPhone photo (HEIC) or a WebP image: decoded through libheif / libwebp,
+# with no extra flags (see Supported Formats)
+forensiclens-cli report IMG_0001.HEIC
+forensiclens-cli report image.webp
+
+# Which formats this build can decode, and whether libheif/libwebp were found
+forensiclens-cli formats
+
 # Just clone detection, as JSON
 forensiclens-cli clone photo.ppm --json
 
@@ -284,6 +298,7 @@ forensiclens-cli thumbnail camera-photo.jpg
 forensiclens-cli report photo.bmp --config strict.yaml
 
 # Recursively scan a folder of images, sorted by suspicion score
+# (JPEG, PNG, HEIC/HEIF, and WebP files are picked up by default)
 forensiclens-cli batch photos/
 
 # Only the top-level directory, and only BMP/PPM files
@@ -413,7 +428,7 @@ To check a build without a browser, `node web/smoke-test.mjs` (Node.js 20 or new
 ### What runs, and what doesn't
 
 - All eight analyzers run with the default configuration, exactly as `forensiclens-cli report` does without a config file. It's the same code, so the same image should give the same scores and regions. The smoke test checks the outcomes the native test suite checks.
-- Formats are the same as the CLI. BMP and PPM/PGM get every pixel analyzer. JPEG gets metadata analysis and the EXIF thumbnail check; the other analyzers don't decode JPEG pixels yet (see [Image format support](#image-format-support)). PNG and other formats get an "Unrecognized image format" error. The page previews BMP and JPEG with the browser's own decoder and PPM/PGM with a small JavaScript decoder (`web/pnm.js`).
+- Formats are the same as the CLI, except HEIF/HEIC and WebP: their decoders are libheif and libwebp, which a WebAssembly module can't load, so the page reports that it can't decode them. BMP and PPM/PGM get every pixel analyzer. JPEG gets metadata analysis and the EXIF thumbnail check; the other analyzers don't decode JPEG pixels yet (see [Supported Formats](#supported-formats)). PNG and other formats get an "Unrecognized image format" error. The page previews BMP and JPEG with the browser's own decoder and PPM/PGM with a small JavaScript decoder (`web/pnm.js`).
 - There's no config file, no PRNU `--reference` mode (it needs a folder of camera images), and no batch mode.
 
 ### Performance
@@ -671,9 +686,55 @@ The result is one whole-image finding, not a per-block map: there's one thumbnai
 
 **Cost.** One header parse, a full decode of a ~160x120 thumbnail, and an entropy decode of the main image without inverse transforms. That's linear in file size, and much cheaper than any pixel analyzer. It doesn't appear in the benchmark table, whose synthetic PPM images carry no EXIF.
 
-## Image format support
+## Supported Formats
 
-Decoding lives entirely in `CStbImage` (C) behind the `ImageDecoding` module, and currently covers uncompressed BMP and binary PPM/PGM. That's enough to build every test fixture in-process without shipping binary test assets or depending on a real JPEG decoder. JPEG *files* are recognized by magic number (so metadata analysis works on them), but `ImageData.load` doesn't decode JPEG pixels: `cstbi_decode_jpeg_baseline` is a documented stub. The pure-Swift `BaselineJPEGDecoder` in the same module is used only by the EXIF thumbnail check for now; see that section for why. ELA, clone detection, and double compression detection require decoded pixels, so they'll throw `AnalyzerError.unsupportedInput` on a JPEG until a real decoder gets dropped in behind that one seam.
+ForensicLens identifies a file's format from its contents (magic numbers and container headers), never from its name. Extensions only decide which files `batch` and `forensiclens-eval` pick up from a directory.
+
+| Format | Extensions | Pixels decoded by | EXIF read from | Analyzers |
+|---|---|---|---|---|
+| BMP | `.bmp` | Built in (`CStbImage`) | (none) | All pixel analyzers |
+| PPM / PGM (binary) | `.ppm`, `.pgm` | Built in (`CStbImage`) | (none) | All pixel analyzers |
+| JPEG | `.jpg`, `.jpeg` | Not yet: metadata only | `APP1` segment | EXIF metadata, EXIF thumbnail |
+| HEIF / HEIC | `.heic`, `.heif`, `.hif` | libheif, loaded at run time | `Exif` item | Every analyzer except the JPEG-specific ones |
+| WebP (lossy and lossless) | `.webp` | libwebp, loaded at run time | `EXIF` chunk | Every analyzer except the JPEG-specific ones |
+
+PNG, TIFF, AVIF, and other formats aren't supported: they fail with an "unrecognized image format" error, and `batch` skips them with that reason. HEIF/HEIC and WebP decode to the same 8-bit RGB `PixelBuffer` every other format produces, so the analyzers don't know or care where the pixels came from. A HEIC is decoded as it's meant to be displayed (rotation and mirroring applied), images with more than 8 bits per channel are reduced to 8, and alpha is dropped. Only the primary image of a HEIF file is analyzed. Animated WebP is rejected with a clear error.
+
+### Format-agnostic and JPEG-specific detectors
+
+- **Format-agnostic: copy-move (clone) detection, PRNU sensor noise, CFA demosaicing (RGB only), EXIF metadata, and EXIF thumbnail consistency.** These run on the decoded pixels or on the EXIF block, whatever the container. EXIF from HEIF and WebP goes through the same reader as JPEG's `APP1` segment (`ContainerMetadata` only finds the block), so every metadata check and the thumbnail check work the same way on all three.
+- **JPEG-specific: Error Level Analysis, JPEG ghost detection, and double JPEG compression detection.** All three model JPEG's 8x8 DCT quantization. HEIC uses HEVC and lossy WebP uses VP8, with different block sizes and transforms and in-loop deblocking, and lossless WebP isn't lossy at all. On those formats they would measure codec artifacts rather than edits, so they report **"not applicable"** with a score of 0 and the reason in the summary. BMP and PPM/PGM still get them, because such a file is often a decoded JPEG and keeps its compression history.
+
+A few format-specific notes:
+
+- **Lossy compression weakens the finest traces.** Re-encoding with HEVC or VP8 (and chroma subsampling) wipes out much of the sensor noise and Bayer interpolation pattern that PRNU and CFA analysis read, so on a typical phone HEIC those two are more likely to report "not assessed" than on lossless input. Clone detection, the EXIF checks, and the thumbnail check hold up much better. The end-to-end tests check clone, PRNU, CFA, and thumbnail detection on bit-exact lossless WebP, and clone, PRNU, and thumbnail detection on lossless HEIC.
+- **HEIF thumbnails.** The thumbnail check reads the JPEG thumbnail in EXIF IFD1. Many HEIC files, iPhone captures among them, store their thumbnail as a separate HEVC image instead, which this check doesn't read, so it's often "not applicable" for them.
+- **Missing EXIF.** A HEIF file without EXIF is treated like a JPEG without it (flagged only with `metadata.flagMissingExif`). A WebP without EXIF never is: most WebP files are web exports whose encoder never wrote any.
+
+### Installing libheif and libwebp
+
+HEIC is HEVC-coded, and writing an HEVC decoder is far outside this project's scope. ForensicLens uses the reference open-source implementations instead: [libheif](https://github.com/strukturag/libheif) (with libde265 for HEVC), used by GIMP, ImageMagick, and most Linux desktops, and Google's [libwebp](https://chromium.googlesource.com/webm/libwebp). Neither is linked at build time. The `CImageCodecs` target opens them with `dlopen` the first time a HEIF or WebP file needs decoding, declaring only the functions it uses from their long-stable C APIs. That keeps the build dependency-free: `swift build` needs nothing but the Swift toolchain, exactly as before, so the GitHub Action, the pre-commit hook, the WebAssembly demo, and Swift Package Index builds are unaffected. Installing either library later turns its format on without rebuilding. macOS and Linux use the same code path. macOS's ImageIO can decode HEIC natively, but using it there and libheif on Linux would give two decoders with slightly different output for the same file.
+
+Install the libraries (runtime packages are enough, no `-dev` packages needed):
+
+| Platform | Command |
+|---|---|
+| macOS (Homebrew) | `brew install libheif webp` |
+| Ubuntu 24.04+ / Debian 13+ | `sudo apt install libheif1 libheif-plugin-libde265 libwebp7` |
+| Older Ubuntu / Debian | `sudo apt install libheif1 libwebp7` (libde265 is built into `libheif1` there) |
+| Fedora | `sudo dnf install libwebp libheif-freeworld` (`libheif-freeworld` is in RPM Fusion; Fedora's own `libheif` can't decode HEVC) |
+
+Then check what was found:
+
+```sh
+forensiclens-cli formats
+```
+
+It lists every format and either the library it loaded (for example `decoded by libheif 1.17.6 (/usr/lib/x86_64-linux-gnu/libheif.so.1)`) or why not, with the install command. Libraries are looked up by their usual names on the system library path, plus the Homebrew (`/opt/homebrew/lib`, `/usr/local/lib`) and MacPorts locations on macOS. Set `FORENSICLENS_LIBHEIF_PATH` or `FORENSICLENS_LIBWEBP_PATH` to the full path of a library file to use a specific copy. Without a library, its files fail with an error naming the library and how to install it (and `batch` skips them with that reason), while everything else works as before. Windows and WebAssembly have no run-time library loading here, so HEIF and WebP are unavailable on those platforms.
+
+Library users can check the same thing with `CodecLibrary.libheif.status` / `CodecLibrary.libwebp.status`. A new format plugs in behind the `PixelDecoder` protocol, with one decoder per file under `Sources/ImageDecoding/Decoders/`, without touching the analyzers.
+
+**About JPEG pixels.** Decoding of the package's own formats lives in `CStbImage` (C) behind the `ImageDecoding` module and covers uncompressed BMP and binary PPM/PGM. That's enough to build every test fixture in-process without shipping binary test assets. JPEG *files* are recognized by magic number (so metadata analysis works on them), but `ImageData.load` doesn't decode JPEG pixels: `cstbi_decode_jpeg_baseline` is a documented stub. The pure-Swift `BaselineJPEGDecoder` in the same module is used only by the EXIF thumbnail check for now; see that section for why. ELA, clone detection, and double compression detection require decoded pixels, so they'll throw `AnalyzerError.unsupportedInput` on a JPEG until a real decoder gets dropped in behind that one seam.
 
 ## Benchmarking
 
@@ -730,7 +791,7 @@ The benchmark above measures how *fast* ForensicLens is. `forensiclens-eval` mea
 
 `--dataset` accepts either of two layouts:
 
-1. **Folders** (recommended): a root directory with an `authentic/` and a `tampered/` subdirectory. Each is scanned recursively, so nested folders (e.g. `tampered/CM/` and `tampered/Sp/`) are fine. Which files count as images is controlled by `--extensions` (default: `bmp,jpeg,jpg,pgm,png,ppm,tif,tiff`).
+1. **Folders** (recommended): a root directory with an `authentic/` and a `tampered/` subdirectory. Each is scanned recursively, so nested folders (e.g. `tampered/CM/` and `tampered/Sp/`) are fine. Which files count as images is controlled by `--extensions` (default: `bmp,heic,heif,hif,jpeg,jpg,pgm,png,ppm,tif,tiff,webp`). A file in a format this build can't decode (a TIFF, or a HEIC without libheif installed) is skipped and listed in the report, like a corrupt one.
 
    ```
    my-dataset/
@@ -809,6 +870,8 @@ swift test
 ```
 
 The whole suite runs offline, without special privileges or real photos, against synthetic images built in-memory by `Tests/ForensicLensTests/Fixtures.swift`. Each analyzer has its own test file (`ELAAnalyzerTests.swift`, `MetadataAnalyzerTests.swift`, `CloneDetectionAnalyzerTests.swift`, `DoubleCompressionAnalyzerTests.swift`), plus `ScoringTests.swift` and `ConfigTests.swift`, and between them they cover edge cases like corrupt image bytes, images with no EXIF, and uniform images with nothing to clone. `RANSACAffineEstimatorTests.swift` covers geometric verification on its own, with no images: synthetic point correspondences generated from a known transform, mixed with planted outliers, must give back that transform's rotation, scale, and translation with every outlier rejected, even when outliers outnumber inliers. Random correspondences, too few correspondences, and collinear points must give no estimate rather than a bogus one. `FeatureCloneDetectionTests.swift` covers the rotation/scale-tolerant clone pass end to end. It pastes a patch of a synthetic texture back into the image after rotating it 30 or 90 degrees, scaling it 1.25x, or rotating 45 degrees while shrinking it to 0.8x. It then checks that the clone is found with the right rotation and scale, and that both reported regions overlap the known ground truth. It also checks that block matching alone misses the rotated copy, that authentic texture, pixel noise, flat images, and tiny images produce no clone (and no crash), and that a rotated clone split across tiles is still found when tiled. `FeatureMatchingCLITests.swift` covers the `--no-feature-matching` flag. The PRNU tests simulate camera sensors (`PRNUFixtures.swift`): a fixed per-pixel gain pattern applied to smooth synthetic scenes, plus read noise. `PRNUMathTests.swift` checks the math on its own against exact or analytic answers: wavelet reconstruction and orthonormality, the Wiener shrinkage rule, FFT outputs and shift recovery, NCC values, lag-correlation signatures of checkerboard and stripe patterns, leave-one-out medians, the consistency formula, and PCE. `PRNUAnalyzerTests.swift` splices a block with no sensor noise, and one with spatially correlated noise, into a simulated capture and checks that exactly that block is flagged, including at reduced working resolution. It also checks that an untouched capture, a uniform image, a clipped image, and a too-small image produce no false finding. `PRNUReferenceTests.swift` builds a fingerprint from five captures of one simulated sensor and checks that a new capture from that sensor matches while one from a different sensor scores lower. It also covers every building error (too few images, mismatched sizes, noiseless references, undecodable or missing files) and `--reference` end to end. The CFA tests simulate a Bayer camera (`CFAFixtures.swift`): a smooth RGB scene is sampled through an RGGB mosaic with sensor noise and bilinearly demosaiced. `CFAPeriodicityTests.swift` checks the math on hand-built grids: the predictor, lattice phases, and the strength statistic's exact values. It also checks that an interpolated green-like or red-like pattern scores high on the right phase, that random noise scores near zero, and that one high-energy block can't outvote the rest. `CFAAnalyzerTests.swift` splices a block of random pixels, one rendered without a mosaic, one upsampled by pixel duplication, and one from a capture with a one-pixel-shifted Bayer grid into a simulated capture. It checks that exactly that block is flagged, and the shifted one as a shifted lattice. It also checks that an untouched capture, an image with no mosaic at all, random noise, flat, grayscale, and too-small images produce no false finding. The JPEG ghost tests build every JPEG with the same simulator the analyzers use. `JPEGGhostMathTests.swift` checks the sweep's quality levels, block difference maps, the ghost quality of hand-made difference curves (a steadily falling curve has none, the lowest of several dips wins, shallow ripples and the lossless end never count), and the dominant-quality vote. `ConfigTests.swift` covers the `jpegGhost` and `thumbnail` sections. `BaselineJPEGDecoderTests.swift` round-trips images through a test-only baseline encoder (`TestJPEGEncoder.swift`: 4:4:4, 4:2:0 with restart markers, grayscale). It decodes a JPEG written by an independent encoder (Windows' GDI+, embedded in the test), checks 1/8-scale decoding against full-scale block means, and makes sure truncated, corrupt, progressive, and non-JPEG input fail with a clear error. `ThumbnailSimilarityTests.swift` checks resampling, letterbox trimming, aspect ratios, and the similarity score on small synthetic planes: identical and brightness-shifted images score 1, unrelated ones near 0, and one replaced cell is found and located. `ThumbnailConsistencyAnalyzerTests.swift` builds complete camera-style JPEGs with an EXIF thumbnail in IFD1. An unedited image must match its thumbnail. An object pasted in after the thumbnail must be flagged as a content mismatch at that spot. A 16:9 crop of a 4:3 photo must be reported as reframed rather than edited. A letterboxed 3:2 thumbnail must not be mistaken for a crop. No thumbnail, no EXIF, a truncated or uncompressed thumbnail, an undecodable main image, and a non-JPEG file must all be not applicable. `JPEGGhostAnalyzerTests.swift` takes a host texture saved at one quality, splices in a block of another texture pre-compressed at a clearly different quality, and saves the composite again. It checks that exactly the spliced blocks are flagged, both for a quality-60 patch in a quality-85 image and for a quality-90 patch in a quality-70 image saved at 90, in grayscale and RGB. It also checks that an untouched JPEG is consistent and that a patch re-saved at a coarser quality goes undetected (a documented limitation). Finally, a never-compressed image must report "not applicable", a JPEG-tagged file without a usable ghost "not assessed", and flat, too-small, and too-narrow-range inputs a clear summary. `DoubleCompressionAnalyzerTests.swift` builds its own synthetic, natural-photo-like texture and feeds it through the same block-DCT recompression simulator `ELAAnalyzer` uses -- once for the single-compression case, twice at different qualities for the double-compression case -- to verify the periodicity check fires only on the latter. `BatchCommandTests.swift` covers the `batch` CLI command; it's the one file in the suite that touches the filesystem, writing its fixture images to a temporary directory (still no network access, and nothing committed to the repo) to exercise real directory scanning and fault isolation on a corrupt file. `TilingTests.swift` covers the tiling layer directly: tile geometry (including partial edge tiles on an image that doesn't divide evenly), automatic activation above `tilingThreshold`, that `--no-tiling` and forced tiling produce materially equivalent scores on the same image, and -- the one correctness requirement in this feature, not just a performance one -- that a synthetic clone spanning two distant tiles is still detected. `TilingCLITests.swift` covers `--tile-size` / `--no-tiling` flag parsing, including the two flags' mutual exclusivity. `FailThresholdTests.swift` covers `batch --fail-threshold`: a run with an image at or above the threshold exits non-zero, one below it exits 0, and skipped files never count. It also covers `batch` over an explicit list of files. The GitHub Action itself is exercised in CI by `.github/workflows/test-action.yml`, against the small fixture images in `.github/action-test-fixtures`. `EvaluationMetricsTests.swift` checks the precision/recall/F1/accuracy and threshold-sweep math against hand-worked confusion matrices, with no images involved, and `EvaluationToolTests.swift` covers `forensiclens-eval`'s dataset layouts and manifest parsing, its error messages for a malformed dataset, and an end-to-end run (single threshold and sweep, JSON and CSV output) over a handful of synthetic authentic and copy-move images written to a temporary directory, including a corrupt file that must be skipped rather than abort the run.
+
+The HEIF/HEIC and WebP tests build their fixtures in-process too, with libheif and libwebp's own encoders, from the same synthetic pixels as every other test. `HEIFWebPDecodingTests.swift` checks format detection, that lossless WebP round-trips bit-exactly, that lossy WebP and HEIC keep their dimensions and colors, and that truncated or garbled files fail with a clear `ImageDecodingError` instead of crashing. `HEIFWebPMetadataTests.swift` checks EXIF extraction from hand-assembled HEIF (`Exif` item in `mdat` or `idat`) and WebP (`EXIF` chunk) containers, including malformed ones, and that `MetadataAnalyzer` scores them like JPEG. `JPEGSpecificDetectorApplicabilityTests.swift` checks that ELA, JPEG ghost, and double-compression detection report "not applicable" on HEIF and WebP, tiled or not. `HEIFWebPPipelineTests.swift` runs the full engine on HEIF and WebP files carrying a planted copy-move clone, PRNU splice, CFA splice, or edit after the EXIF thumbnail, and checks that each is found through the new decoders. `HEIFWebPBatchTests.swift` and `HEIFWebPEvaluationTests.swift` cover default extensions, `formats`, and skipping corrupt HEIF/WebP files in `batch` and `forensiclens-eval`. Tests that need libheif or libwebp skip themselves (with the install command) when the library isn't installed. CI installs both, plus libheif's HEVC encoder plugin for writing the fixtures, and sets `FORENSICLENS_REQUIRE_IMAGE_CODECS=1`, which turns a missing library into a failure instead of a skip.
 
 The WebAssembly build has its own smoke test, `node web/smoke-test.mjs`, run after `scripts/wasm/build.sh` (see [Web Demo](#web-demo)). It isn't part of `swift test` or CI, since it needs the Swift SDK for WebAssembly.
 

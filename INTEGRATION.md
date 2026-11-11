@@ -102,8 +102,9 @@ The hook uses pre-commit's `swift` language support. pre-commit builds ForensicL
 
 ## What gets analyzed today
 
-The integrations analyze exactly what the CLI analyzes. See [Image format support](README.md#image-format-support) in the README. Currently:
+The integrations analyze exactly what the CLI analyzes. See [Supported Formats](README.md#supported-formats) in the README. Currently:
 
 - **JPEG** files get metadata (EXIF) analysis and the EXIF thumbnail consistency check. Their pixels aren't decoded yet, so pixel-based analyzers (error level analysis, clone detection, double compression, PRNU sensor noise, CFA demosaicing, JPEG ghosts) don't contribute to their score.
 - **PNG** files aren't decoded yet. They're reported as skipped and never fail the check.
 - **BMP and PPM/PGM** files get every analyzer. Add them with `extensions` in the action, or `args: [--extensions, "bmp,ppm,jpg,jpeg,png"]` in the hook along with matching `types_or`/`files` filters.
+- **HEIF/HEIC and WebP** files get every analyzer except the JPEG-specific ones, but only where libheif and libwebp are installed, which GitHub's runners don't have by default. To scan them in the action, install the libraries in an earlier step (`sudo apt-get install -y libheif1 libheif-plugin-libde265 libwebp7` on `ubuntu-24.04`, `brew install libheif webp` on macOS) and add `heic,heif,hif,webp` to `extensions`. Without the libraries, those files are reported as skipped and never fail the check.
