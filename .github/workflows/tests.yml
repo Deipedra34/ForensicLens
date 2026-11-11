@@ -19,9 +19,34 @@ jobs:
         # swift-actions/setup-swift#805). Move back once that's fixed.
         os: [macos-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    # The HEIF/HEIC and WebP tests skip themselves when libheif/libwebp
+    # aren't installed, so a contributor without them can still run the
+    # suite. Here the libraries are installed (below), and this makes those
+    # tests fail instead of skipping if loading them ever stops working.
+    env:
+      FORENSICLENS_REQUIRE_IMAGE_CODECS: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      # libheif and libwebp are loaded at run time, not linked, so building
+      # needs neither; the tests need both to exercise the real HEIF/HEIC
+      # and WebP decoders. libheif also needs an HEVC decoder (libde265) to
+      # read HEIC, and an HEVC encoder (x265) for the tests to write their
+      # synthetic HEIC fixtures. Homebrew's libheif includes both; on Ubuntu
+      # 24.04 they're separate plugin packages.
+      - name: Install image codec libraries (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install libheif webp
+
+      - name: Install image codec libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libheif1 libheif-plugin-libde265 libheif-plugin-x265 libwebp7
 
       # macOS runners ship Xcode's own Swift toolchain, which already
       # satisfies this package's swift-tools-version:5.9 floor, so there's
