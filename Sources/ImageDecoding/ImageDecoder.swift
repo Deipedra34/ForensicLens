@@ -37,6 +37,8 @@ public enum ImageDecoder {
             return NetpbmDecoder()
         case .jpeg:
             return JPEGStubDecoder()
+        case .heif:
+            return HEIFDecoder()
         }
     }
 }

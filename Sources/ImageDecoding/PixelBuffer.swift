@@ -105,6 +105,15 @@ public enum ImageDecodingError: Error, Equatable, CustomStringConvertible {
     /// documented stub. See `cstbi_decode_jpeg_baseline` for rationale.
     case notImplemented(String)
 
+    /// The format was recognized, but the system library that decodes it
+    /// couldn't be loaded (see `CodecLibrary`). The message names the
+    /// library and how to install it.
+    case decoderUnavailable(String)
+
+    /// The decoder rejected the data as corrupt, truncated, or an
+    /// unsupported variant of its format. The message is its explanation.
+    case corruptData(String)
+
     /// An unrecognized error code was returned from the C layer.
     case unknown(code: Int32)
 
@@ -124,6 +133,10 @@ public enum ImageDecodingError: Error, Equatable, CustomStringConvertible {
             return "Memory allocation failed while decoding the image."
         case .notImplemented(let detail):
             return "Not implemented: \(detail)"
+        case .decoderUnavailable(let detail):
+            return detail
+        case .corruptData(let detail):
+            return "Corrupt or unsupported image data: \(detail)"
         case .unknown(let code):
             return "Unknown image decoding error (code \(code))."
         }

@@ -9,7 +9,8 @@ import ImageDecoding
 /// trip, and the report shows exactly the file that was analyzed. PPM/PGM
 /// are the exception: no browser renders them, so those are re-encoded
 /// from the already-decoded `PixelBuffer` into a BMP, which every major
-/// browser does render.
+/// browser does render. HEIF/HEIC is treated the same way, since only
+/// Safari displays it.
 public struct EmbeddedImage: Sendable, Equatable {
     public let mimeType: String
     public let bytes: [UInt8]
@@ -40,7 +41,7 @@ public struct EmbeddedImage: Sendable, Equatable {
             return EmbeddedImage(mimeType: "image/bmp", bytes: image.rawBytes, width: width, height: height)
         case .jpeg?:
             return EmbeddedImage(mimeType: "image/jpeg", bytes: image.rawBytes, width: width, height: height)
-        case .ppm?, .pgm?, nil:
+        case .ppm?, .pgm?, .heif?, nil:
             guard let pixels = image.pixels else { return nil }
             return EmbeddedImage(mimeType: "image/bmp", bytes: ImageEncoder.encodeBMP(pixels), width: pixels.width, height: pixels.height)
         }
