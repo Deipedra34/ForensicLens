@@ -72,6 +72,9 @@ public struct DoubleCompressionAnalyzer: Analyzer {
     public init() {}
 
     public func analyze(_ image: ImageData, config: ForensicLensConfig) throws -> AnalyzerFinding {
+        if let reason = image.format?.jpegAnalysisNotApplicableReason {
+            return .jpegAnalysisNotApplicable(analyzerID: identifier, displayName: displayName, reason: reason)
+        }
         guard image.format == .jpeg else {
             return AnalyzerFinding.clean(
                 analyzerID: identifier,

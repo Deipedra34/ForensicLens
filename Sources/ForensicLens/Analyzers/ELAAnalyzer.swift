@@ -54,6 +54,9 @@ public struct ELAAnalyzer: Analyzer {
     public init() {}
 
     public func analyze(_ image: ImageData, config: ForensicLensConfig) throws -> AnalyzerFinding {
+        if let reason = image.format?.jpegAnalysisNotApplicableReason {
+            return .jpegAnalysisNotApplicable(analyzerID: identifier, displayName: displayName, reason: reason)
+        }
         guard let buffer = image.pixels else {
             throw AnalyzerError.unsupportedInput("ELA requires decoded pixel data, but this image has none (its format's pixel decoder is a documented stub -- see ImageDecoder).")
         }
