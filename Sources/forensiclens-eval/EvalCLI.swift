@@ -1,13 +1,19 @@
 import Foundation
 import BatchProcessing
 import ForensicLens
+import ImageDecoding
 
 /// Parsed `forensiclens-eval` options.
 struct EvalOptions: Equatable {
     /// Matches the score where `SuspicionScorer`'s verdict moves from
     /// "minor anomalies" to "suspicious".
     static let defaultThreshold = 45.0
-    static let defaultExtensions: Set<String> = ["jpg", "jpeg", "png", "bmp", "ppm", "pgm", "tif", "tiff"]
+    /// Every extension a CASIA-style dataset is likely to use, including
+    /// HEIF/HEIC and WebP. Files that turn out to be unreadable or in a
+    /// format this build can't decode are skipped and listed in the report,
+    /// exactly like in `batch`.
+    static let defaultExtensions: Set<String> = Set(["jpg", "jpeg", "png", "bmp", "ppm", "pgm", "tif", "tiff"]
+        + ImageFormat.heif.fileExtensions + ImageFormat.webp.fileExtensions)
 
     var datasetPath: String
     var threshold = defaultThreshold
