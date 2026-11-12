@@ -31,6 +31,42 @@ struct PowerSpectrum: Sendable, Equatable {
         self.values = values
     }
 
+    /// The power spectrum of a `size` x `size` row-major real plane.
+    ///
+    /// The plane's mean is subtracted first, so the zero-frequency bin
+    /// holds only what windowing leaves there rather than the overall
+    /// brightness dwarfing every other bin. With `windowed` (the default)
+    /// the plane is then multiplied by a separable 2D Hann window (see
+    /// `hannWindow(size:)`) before the forward transform. Power is
+    /// `re^2 + im^2`, unnormalized; analyses compare bins against each
+    /// other, so the absolute scale doesn't matter.
+    ///
+    /// `nil` unless `size` is a power of two of at least 2 and `plane`
+    /// holds exactly `size * size` samples.
+    init?(of plane: [Double], size: Int, windowed: Bool = true) {
+        guard size >= 2, FFT.isPowerOfTwo(size), plane.count == size * size else { return nil }
+
+        let mean = plane.reduce(0, +) / Double(plane.count)
+        var real = plane.map { $0 - mean }
+        if windowed {
+            let window = Self.hannWindow(size: size)
+            for y in 0..<size {
+                let rowWeight = window[y]
+                for x in 0..<size {
+                    real[y * size + x] *= rowWeight * window[x]
+                }
+            }
+        }
+        var imaginary = [Double](repeating: 0, count: plane.count)
+        guard FFT.transform2D(&real, &imaginary, width: size, height: size, inverse: false) else { return nil }
+
+        var power = [Double](repeating: 0, count: plane.count)
+        for i in 0..<power.count {
+            power[i] = real[i] * real[i] + imaginary[i] * imaginary[i]
+        }
+        self.init(size: size, values: power)
+    }
+
     /// The power at horizontal frequency bin `u` and vertical bin `v`,
     /// wrapping both around the spectrum's edges.
     subscript(u: Int, v: Int) -> Double {
