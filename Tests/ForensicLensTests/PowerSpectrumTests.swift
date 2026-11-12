@@ -88,6 +88,62 @@ final class PowerSpectrumTests: XCTestCase {
         XCTAssertEqual(spectrum[0, 0], 0, accuracy: 1e-6)
     }
 
+    // MARK: - Local statistics
+
+    func testIndexingWrapsAroundBothAxes() throws {
+        let size = 8
+        let values = (0..<(size * size)).map(Double.init)
+        let spectrum = try XCTUnwrap(PowerSpectrum(size: size, values: values))
+        XCTAssertEqual(spectrum[-1, 0], spectrum[size - 1, 0])
+        XCTAssertEqual(spectrum[0, -1], spectrum[0, size - 1])
+        XCTAssertEqual(spectrum[size + 2, 2 * size + 3], spectrum[2, 3])
+        XCTAssertEqual(spectrum.wrap(-17), 7)
+    }
+
+    func testLocalPeakFindsTheMaximumInItsNeighborhoodAcrossTheEdge() throws {
+        let size = 8
+        var values = [Double](repeating: 1, count: size * size)
+        values[(size - 1) * size + (size - 1)] = 50 // bin (7, 7), adjacent to (0, 0) by wrapping
+        let spectrum = try XCTUnwrap(PowerSpectrum(size: size, values: values))
+        XCTAssertEqual(spectrum.localPeak(u: 0, v: 0), 50)
+        XCTAssertEqual(spectrum.localPeak(u: 0, v: 0, radius: 0), 1)
+        XCTAssertEqual(spectrum.localPeak(u: 4, v: 4), 1)
+    }
+
+    func testRingMedianIgnoresTheCenterAndOneOutlier() throws {
+        let size = 16
+        var values = [Double](repeating: 2, count: size * size)
+        values[8 * size + 8] = 1_000        // the candidate itself, inside the inner radius
+        values[8 * size + 9] = 1_000        // its one-bin spread, also inside
+        values[8 * size + 11] = 9_999       // one unrelated strong bin inside the ring
+        let spectrum = try XCTUnwrap(PowerSpectrum(size: size, values: values))
+        XCTAssertEqual(try XCTUnwrap(spectrum.ringMedian(u: 8, v: 8, innerRadius: 2, outerRadius: 4)), 2)
+    }
+
+    func testRingMedianRejectsImpossibleRings() throws {
+        let spectrum = try XCTUnwrap(PowerSpectrum(size: 8, values: [Double](repeating: 1, count: 64)))
+        XCTAssertNil(spectrum.ringMedian(u: 0, v: 0, innerRadius: 3, outerRadius: 2))
+        XCTAssertNil(spectrum.ringMedian(u: 0, v: 0, innerRadius: 1, outerRadius: 4)) // 9 > 8 bins across
+        XCTAssertEqual(spectrum.ringMedian(u: 0, v: 0, innerRadius: 1, outerRadius: 3), 1)
+    }
+
+    func testWhiteNoiseHasNoBinFarAboveItsLocalBackground() throws {
+        let size = 64
+        var generator = Fixtures.SeededGenerator(seed: 2024)
+        let noise = (0..<(size * size)).map { _ in Fixtures.nextGaussian(&generator) }
+        let spectrum = try XCTUnwrap(PowerSpectrum(of: noise, size: size))
+        var worst = 0.0
+        for v in stride(from: 0, to: size, by: 8) {
+            for u in stride(from: 0, to: size, by: 8) where u != 0 || v != 0 {
+                let background = try XCTUnwrap(spectrum.ringMedian(u: u, v: v, innerRadius: 2, outerRadius: 4))
+                worst = max(worst, spectrum.localPeak(u: u, v: v) / background)
+            }
+        }
+        // Power in a noise bin is exponentially distributed, so a local
+        // peak over 9 bins rarely reaches 10x the ring median, never 30x.
+        XCTAssertLessThan(worst, 30)
+    }
+
     // MARK: - Hann window
 
     func testHannWindowShape() {
