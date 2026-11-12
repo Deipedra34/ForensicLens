@@ -86,6 +86,51 @@ struct PowerSpectrum: Sendable, Equatable {
         return (values.reduce(0, +) - values[0]) / Double(values.count - 1)
     }
 
+    // MARK: - Local statistics
+
+    /// The largest power within Chebyshev distance `radius` of `(u, v)`
+    /// (a `(2 * radius + 1)`-square), wrapping around the edges.
+    ///
+    /// A windowed tone that falls between two bins, or the Hann window's
+    /// own one-bin spread, can move a peak's maximum off its nominal bin;
+    /// taking the local maximum over radius 1 catches it either way.
+    func localPeak(u: Int, v: Int, radius: Int = 1) -> Double {
+        let r = max(0, radius)
+        var peak = 0.0
+        for dv in -r...r {
+            for du in -r...r {
+                peak = max(peak, self[u + du, v + dv])
+            }
+        }
+        return peak
+    }
+
+    /// The median power over the square ring of bins whose Chebyshev
+    /// distance from `(u, v)` lies in `innerRadius...outerRadius`, wrapping
+    /// around the edges. `nil` if the ring is empty (an inner radius above
+    /// the outer one) or would cover the whole spectrum more than once.
+    ///
+    /// This is the local "what the spectrum looks like around here"
+    /// baseline a candidate peak is compared against. The ring skips the
+    /// bins the peak itself spreads into, and a median rather than a mean
+    /// keeps one unrelated strong bin in the ring from inflating the
+    /// baseline and hiding a real peak.
+    func ringMedian(u: Int, v: Int, innerRadius: Int, outerRadius: Int) -> Double? {
+        let inner = max(0, innerRadius)
+        guard outerRadius >= inner, 2 * outerRadius + 1 <= size else { return nil }
+        var ring: [Double] = []
+        ring.reserveCapacity((2 * outerRadius + 1) * (2 * outerRadius + 1))
+        for dv in -outerRadius...outerRadius {
+            for du in -outerRadius...outerRadius where max(abs(du), abs(dv)) >= inner {
+                ring.append(self[u + du, v + dv])
+            }
+        }
+        guard !ring.isEmpty else { return nil }
+        ring.sort()
+        let middle = ring.count / 2
+        return ring.count % 2 == 1 ? ring[middle] : 0.5 * (ring[middle - 1] + ring[middle])
+    }
+
     // MARK: - Windowing
 
     /// The 1D periodic Hann window of length `size`:
