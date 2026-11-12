@@ -2,6 +2,12 @@ import Foundation
 
 /// A plain-Swift, radix-2 fast Fourier transform, in 1D and 2D.
 ///
+/// This is the package's one frequency-domain primitive, shared by every
+/// analyzer that needs one: PRNU reference verification (correlation
+/// planes, below) and the spectral-artifact check behind AI-generated image
+/// detection (power spectra, through `PowerSpectrum`). It started out under
+/// `Analyzers/PRNU` and moved here once a second analyzer needed it.
+///
 /// PRNU camera verification needs a correlation plane: the normalized
 /// cross-correlation between two images at every relative shift. That's
 /// what PCE (peak-to-correlation energy) measures its peak against.
