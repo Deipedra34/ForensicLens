@@ -88,7 +88,11 @@ final class HEIFWebPPipelineTests: XCTestCase {
 
     func testWebPDecodesTheFixturePixelsExactly() throws {
         let buffer = try cfaSpliced()
-        XCTAssertEqual(try ImageData.load(Fixtures.webpFile(buffer)).pixels?.pixels, buffer.pixels)
+        // Encoded outside the assertion: a skip thrown from inside an
+        // XCTAssert autoclosure is reported as a failure rather than a skip
+        // on platforms where libwebp can't be loaded.
+        let file = try Fixtures.webpFile(buffer)
+        XCTAssertEqual(try ImageData.load(file).pixels?.pixels, buffer.pixels)
     }
 
     func testCloneIsDetectedInAWebPFile() throws {
