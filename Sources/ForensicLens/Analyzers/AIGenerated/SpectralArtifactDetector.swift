@@ -79,6 +79,60 @@ enum SpectralArtifactDetector {
         return PRNUPlane(width: plane.width, height: plane.height, values: residual)
     }
 
+    // MARK: - Measurement
+
+    /// Inner and outer Chebyshev radius of the ring of bins each candidate
+    /// is compared against. The inner radius skips the one-bin spread a
+    /// windowed peak leaks into its neighbors; the outer one stays short of
+    /// the next lattice bin even at the minimum crop size.
+    static let backgroundInnerRadius = 2
+    static let backgroundOuterRadius = 4
+
+    /// Upper bound on a reported peak-to-background ratio. A perfectly
+    /// periodic synthetic pattern on a noise-free background has a
+    /// background of essentially zero; capping keeps the ratio finite and
+    /// printable without changing any decision made from it.
+    static let maximumPeakRatio = 1e6
+
+    /// Mean residual energy per sample (in squared gray levels) below
+    /// which the crop counts as having no fine detail at all: a flat or
+    /// nearly flat image, whose spectrum is floating-point dust.
+    static let minimumResidualEnergy = 1e-4
+
+    /// Measures every lattice frequency of `luma`'s centered analysis crop.
+    static func measure(_ luma: PRNUPlane) -> SpectralArtifactMeasurement {
+        guard let region = cropRegion(width: luma.width, height: luma.height) else {
+            return .insufficientData("the image is smaller than the \(minimumCropSize)x\(minimumCropSize) px a spectral check needs")
+        }
+        let residual = highPassResidual(luma.cropped(to: region))
+        let size = region.width
+        let energy = residual.values.reduce(0) { $0 + $1 * $1 } / Double(max(1, residual.values.count))
+        guard energy >= minimumResidualEnergy else {
+            return .insufficientData("the analyzed area has no fine detail (a flat or nearly flat image)")
+        }
+        guard let spectrum = PowerSpectrum(of: residual.values, size: size) else {
+            return .insufficientData("the analyzed area could not be transformed")
+        }
+
+        let floor = max(spectrum.meanNonZeroFrequencyPower * 1e-9, Double.leastNormalMagnitude)
+        let peaks = latticeFrequencies(size: size).map { bin -> SpectralArtifactMeasurement.LatticePeak in
+            let peak = spectrum.localPeak(u: bin.u, v: bin.v)
+            let background = spectrum.ringMedian(u: bin.u, v: bin.v, innerRadius: backgroundInnerRadius, outerRadius: backgroundOuterRadius) ?? 0
+            let ratio = min(maximumPeakRatio, peak / max(background, floor))
+            return SpectralArtifactMeasurement.LatticePeak(bin: bin, period: period(of: bin, size: size), ratio: ratio)
+        }
+        return SpectralArtifactMeasurement(status: .measured, analyzedRegion: region, cropSize: size, peaks: peaks)
+    }
+
+    /// The shortest of `upsamplingPeriods` whose lattice contains `bin`
+    /// (0 if none does).
+    static func period(of bin: Bin, size: Int) -> Int {
+        for period in upsamplingPeriods.sorted() where (bin.u * period) % size == 0 && (bin.v * period) % size == 0 {
+            return period
+        }
+        return 0
+    }
+
     // MARK: - Lattice frequencies
 
     /// The frequency bin `(u, v)` of a candidate lattice peak.
