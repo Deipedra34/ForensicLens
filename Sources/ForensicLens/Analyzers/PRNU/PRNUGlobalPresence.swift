@@ -31,6 +31,27 @@ struct PRNUPresenceAssessment: Sendable, Equatable {
     }
 
     var isAssessed: Bool { status == .assessed }
+
+    /// The PRNU-absence signal, 0 to 1, for a coverage `threshold` (0 to
+    /// 1, clamped): `(threshold - coverage) / threshold`, floored at 0.
+    ///
+    /// 0 whenever at least `threshold` of the blocks carry sensor-like
+    /// noise, as a camera image normally does even if part of it was
+    /// edited. It rises linearly as coverage drops below the threshold,
+    /// reaching 1 when no block at all does. 0 when the image couldn't be
+    /// assessed, or with a threshold of 0 (which disables the signal):
+    /// an unmeasured signal never counts as evidence.
+    func absenceSignal(threshold: Double) -> Double {
+        let clamped = min(1, max(0, threshold.isFinite ? threshold : 0))
+        guard isAssessed, clamped > 0 else { return 0 }
+        return max(0, min(1, (clamped - coverage) / clamped))
+    }
+
+    /// Whether coverage falls below `threshold`: no coherent sensor-noise
+    /// fingerprint across the image.
+    func lacksFingerprint(threshold: Double) -> Bool {
+        absenceSignal(threshold: threshold) > 0
+    }
 }
 
 /// Checks whether an image shows a coherent camera sensor-noise
