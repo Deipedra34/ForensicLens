@@ -474,12 +474,15 @@ enum CLI {
           cfa                 Run only CFA demosaicing consistency analysis.
           jpegghost           Run only JPEG ghost detection.
           thumbnail           Run only the EXIF thumbnail consistency check.
+          aigenerated         Run only the AI-generated image check (spectral
+                               upsampling artifacts + absence of camera sensor
+                               noise; signals, not a verdict).
           batch               Scan directories and/or image files and print one summary report.
           formats             List the image formats this build handles, and whether the
                                libheif/libwebp libraries for HEIF/HEIC and WebP were found.
           help                Show this message.
 
-        OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail):
+        OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail / aigenerated):
           --json           Print the report as JSON instead of plain text.
           --html-report <path>
                            Also write a self-contained HTML report to <path>:
@@ -548,6 +551,7 @@ enum CLI {
           forensiclens-cli cfa photo.ppm
           forensiclens-cli jpegghost photo-from-jpeg.bmp
           forensiclens-cli thumbnail camera-photo.jpg
+          forensiclens-cli aigenerated render.bmp
           forensiclens-cli batch photos/
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json
