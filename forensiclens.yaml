@@ -259,3 +259,40 @@ thumbnail:
   # reported as a content mismatch. Unedited images measure ~0.94 or more.
   # A different aspect ratio is reported separately, whatever this is set to.
   similarityThreshold: 0.7
+
+aiGenerated:
+  # Whether to look for statistical signals consistent with a fully
+  # AI-generated (GAN or diffusion) image rather than a camera photo. Two
+  # classical signal-analysis checks feed it -- this is not a trained
+  # classifier, and the result is "signals consistent with AI generation",
+  # never a verdict:
+  #   - spectral artifacts: sharp peaks at the frequencies a 2x/4x/8x
+  #     upsampling layer's periodic "checkerboard" pattern produces, in the
+  #     high-pass spectrum of a centered crop (up to 512x512, never resampled);
+  #   - PRNU absence: no coherent camera sensor noise anywhere in the image
+  #     (unlike the prnu section's local check, which compares blocks of a
+  #     presumed-real photo against each other).
+  # Expect it to miss newer and less common generators, and to weaken as
+  # generators improve their upsampling or add synthetic noise.
+  enabled: true
+
+  # How readily a lattice-frequency peak counts as an artifact, 0 to 1. The
+  # peak must stand 10^(2 - spectralSensitivity) times above its local
+  # spectral background: 100x at 0, ~32x at 0.5, 10x at 1. Values near 1
+  # start flagging chance fluctuations on noisy images.
+  spectralSensitivity: 0.5
+
+  # Share of blocks (0 to 1) that must carry camera-like sensor noise for
+  # the image to count as having a sensor fingerprint. Below it, the
+  # PRNU-absence signal rises linearly to 1 at zero coverage. 0 disables it.
+  # Uses the prnu section's blockSize and maximumWorkingDimension.
+  prnuAbsenceThreshold: 0.5
+
+  # How much one signal counts on its own, 0 to 1. The combined likelihood
+  # is min(s, a) + singleSignalWeight * (max(s, a) - min(s, a)) for the
+  # spectral signal s and PRNU-absence signal a; the finding scores up to 75
+  # points. 0 (default) needs both signals to agree, since each alone has
+  # common innocent causes (JPEG grids and demosaicing peaks; screenshots and
+  # heavily processed images with no sensor noise). 0.5 averages them; 1
+  # lets either decide alone.
+  singleSignalWeight: 0
