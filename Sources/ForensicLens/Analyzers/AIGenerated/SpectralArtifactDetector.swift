@@ -22,6 +22,65 @@ enum SpectralArtifactDetector {
     /// candidate set is every multiple of `size / 8`.
     static let upsamplingPeriods = [2, 4, 8]
 
+    /// Smallest analysis crop, in pixels. Below this the lattice bins sit
+    /// too close together (8 bins apart for period 8) for a ring of
+    /// background bins to fit between them, and too few samples feed each
+    /// bin for a stable estimate.
+    static let minimumCropSize = 64
+
+    /// Largest analysis crop, in pixels. 512x512 gives each lattice bin
+    /// plenty of averaging while bounding the transform at about a quarter
+    /// of a million samples, whatever the image size.
+    static let maximumCropSize = 512
+
+    // MARK: - Analysis crop
+
+    /// The side length of the square, power-of-two crop analyzed for a
+    /// `width` x `height` image: the largest power of two that fits both
+    /// dimensions, capped at `maximumCropSize`. `nil` if even
+    /// `minimumCropSize` doesn't fit.
+    ///
+    /// The crop is taken at native resolution and never resampled, since
+    /// resampling would itself imprint a new periodic structure and wipe
+    /// out the one being measured.
+    static func cropSize(width: Int, height: Int) -> Int? {
+        let fit = min(width, height)
+        guard fit >= minimumCropSize else { return nil }
+        var size = minimumCropSize
+        while size * 2 <= fit && size * 2 <= maximumCropSize { size *= 2 }
+        return size
+    }
+
+    /// The centered `cropSize` square of `luma`, as a region in its pixel
+    /// coordinates. `nil` if the image is too small.
+    static func cropRegion(width: Int, height: Int) -> Region? {
+        guard let size = cropSize(width: width, height: height) else { return nil }
+        return Region(x: (width - size) / 2, y: (height - size) / 2, width: size, height: size)
+    }
+
+    /// The high-frequency residual of `plane`: each sample minus the mean
+    /// of the 3x3 neighborhood around it.
+    ///
+    /// Natural images put almost all their energy at low frequencies, and
+    /// that slope would otherwise dominate the spectrum and bury faint
+    /// high-frequency peaks under the window's sidelobes. Upsampling
+    /// artifacts live in the fine detail, mostly at periods of 2 to 8
+    /// pixels, which a 3x3 high-pass keeps. It reuses the summed-area local
+    /// mean from PRNU residual extraction rather than the full wavelet
+    /// denoiser, which would cost far more and is tuned to keep noise, not
+    /// periodic structure.
+    static func highPassResidual(_ plane: PRNUPlane) -> PRNUPlane {
+        guard plane.width > 0, plane.height > 0 else { return plane }
+        let means = PRNUResidualExtractor.localMeans(of: plane.values, width: plane.width, height: plane.height, window: 3)
+        var residual = plane.values
+        for i in 0..<residual.count {
+            residual[i] -= means[i]
+        }
+        return PRNUPlane(width: plane.width, height: plane.height, values: residual)
+    }
+
+    // MARK: - Lattice frequencies
+
     /// The frequency bin `(u, v)` of a candidate lattice peak.
     struct Bin: Hashable, Sendable {
         let u: Int
