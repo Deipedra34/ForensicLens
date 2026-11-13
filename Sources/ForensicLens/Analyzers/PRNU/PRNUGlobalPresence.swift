@@ -95,6 +95,35 @@ enum PRNUGlobalPresence {
         return correlations.allSatisfy { abs($0) <= maximumLagCorrelation }
     }
 
+    /// Assesses a decoded image, seeing it exactly the way PRNU local
+    /// consistency does: the same `blockSize` (raised to
+    /// `PRNUAnalyzer.minimumBlockSize`) and the same integer box
+    /// downsampling to `maximumWorkingDimension`, so the two PRNU-based
+    /// checks agree on which noise they're looking at. Downsampling by a
+    /// factor `s` averages independent noise down by about `s`, so the noise
+    /// level bar is lowered by the same factor to stay comparable.
+    static func assess(_ buffer: PixelBuffer, settings: ForensicLensConfig.PRNUConfig) -> PRNUPresenceAssessment {
+        let blockSize = max(PRNUAnalyzer.minimumBlockSize, settings.blockSize)
+        let scale = PRNUAnalyzer.workingScale(width: buffer.width, height: buffer.height, maximumWorkingDimension: settings.maximumWorkingDimension)
+        guard buffer.width / scale >= blockSize, buffer.height / scale >= blockSize else {
+            return PRNUPresenceAssessment(
+                status: .insufficientData("the image is smaller than one \(blockSize)x\(blockSize) px block at working resolution"),
+                reliableBlockCount: 0,
+                sensorLikeBlockCount: 0,
+                medianNoiseLevel: 0
+            )
+        }
+
+        let luma = PRNUPlane.luminance(of: buffer).downsampled(by: scale)
+        var residual = PRNUResidualExtractor.residual(of: luma)
+        if scale > 1 {
+            // Undo the averaging's noise attenuation, so the fixed
+            // per-pixel noise bar means the same thing at every scale.
+            residual.values = residual.values.map { $0 * Double(scale) }
+        }
+        return assess(residual: residual, luma: luma, blockSize: blockSize, minimumReliableBlocks: PRNUAnalyzer.minimumReliableBlocks)
+    }
+
     /// Classifies every non-overlapping `blockSize` block of `residual`
     /// (with matching `luma`, both at working resolution). Partial blocks
     /// at the right and bottom edges are left out, as in the local check.
