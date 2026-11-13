@@ -121,6 +121,8 @@ public enum ConfigLoader {
             try applyJPEGGhost(key: key, value: value, to: &config.jpegGhost)
         case "thumbnail":
             try applyThumbnail(key: key, value: value, to: &config.thumbnail)
+        case "aiGenerated":
+            try applyAIGenerated(key: key, value: value, to: &config.aiGenerated)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -280,6 +282,21 @@ public enum ConfigLoader {
             thumbnail.similarityThreshold = try parseDouble(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "thumbnail", key: key)
+        }
+    }
+
+    private static func applyAIGenerated(key: String, value: String, to aiGenerated: inout ForensicLensConfig.AIGeneratedConfig) throws {
+        switch key {
+        case "enabled":
+            aiGenerated.enabled = try parseBool(key: key, value: value)
+        case "spectralSensitivity":
+            aiGenerated.spectralSensitivity = try parseDouble(key: key, value: value)
+        case "prnuAbsenceThreshold":
+            aiGenerated.prnuAbsenceThreshold = try parseDouble(key: key, value: value)
+        case "singleSignalWeight":
+            aiGenerated.singleSignalWeight = try parseDouble(key: key, value: value)
+        default:
+            throw ConfigError.unknownKey(section: "aiGenerated", key: key)
         }
     }
 
