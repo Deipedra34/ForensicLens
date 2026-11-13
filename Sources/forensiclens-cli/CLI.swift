@@ -65,7 +65,7 @@ enum CLI {
             switch command {
             case "report":
                 only = nil
-            case "ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost", "thumbnail":
+            case "ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost", "thumbnail", "aigenerated":
                 only = [command]
             default:
                 eprint("Error: unknown command \"\(command)\".")
