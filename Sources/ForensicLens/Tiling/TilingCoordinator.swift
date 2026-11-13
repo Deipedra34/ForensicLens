@@ -84,6 +84,10 @@ enum TilingCoordinator {
     /// it reads one block at a time anyway, so memory stays small. JPEG ghost
     /// detection is likewise compared against one image-wide dominant
     /// quality, which a tile lying entirely inside a splice would get wrong.
+    /// AI-generated image detection runs as a single block too: both of its
+    /// signals are image-wide (one spectrum of a bounded center crop, and the
+    /// share of the whole frame carrying sensor noise), and a per-tile pass
+    /// would only fragment them.
     /// Clone detection is dispatched to `TiledCloneDetection`
     /// instead of `SpatialTileMerger`, since its cross-tile correctness
     /// requirement (a source/copy pair split across two tiles must still
@@ -96,7 +100,7 @@ enum TilingCoordinator {
         }
 
         switch analyzer.identifier {
-        case "metadata", "prnu", "cfa", "jpegghost", "thumbnail":
+        case "metadata", "prnu", "cfa", "jpegghost", "thumbnail", "aigenerated":
             return try analyzer.analyze(image, config: config)
         case "clone":
             return try TiledCloneDetection.run(image: image, config: config)
