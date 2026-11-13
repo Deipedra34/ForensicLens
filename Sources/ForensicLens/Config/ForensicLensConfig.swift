@@ -344,6 +344,45 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         public static let `default` = ThumbnailConfig(enabled: true, similarityThreshold: 0.7)
     }
 
+    /// Settings for `AIGeneratedImageAnalyzer`.
+    public struct AIGeneratedConfig: Codable, Equatable, Sendable {
+        /// Whether the AI-generated image check runs as part of a combined
+        /// report.
+        public var enabled: Bool
+
+        /// How readily a spectral peak at an upsampling-lattice frequency
+        /// counts as an artifact, from 0 (only very strong peaks) to 1
+        /// (weak ones too). The peak must stand `10^(2 - sensitivity)`
+        /// times above its local spectral background: 100x at 0, about 32x
+        /// at the default 0.5, 10x at 1. Values near 1 start flagging
+        /// chance fluctuations on noisy images. Clamped to 0...1.
+        public var spectralSensitivity: Double
+
+        /// The share of an image's blocks (0 to 1) that must carry
+        /// camera-like sensor noise for it to count as having a coherent
+        /// sensor fingerprint. Below it, the PRNU-absence signal rises
+        /// linearly to 1 at zero coverage. Higher flags more readily; 0
+        /// turns the signal off. Clamped to 0...1.
+        public var prnuAbsenceThreshold: Double
+
+        /// How much one signal counts on its own, from 0 to 1: the combined
+        /// likelihood is `min(s, a) + singleSignalWeight * (max(s, a) - min(s, a))`
+        /// for spectral signal `s` and PRNU-absence signal `a`. 0 (the
+        /// default) requires both signals to agree, 0.5 averages them, and
+        /// 1 lets either one decide alone. See `AIGenerationScore`.
+        public var singleSignalWeight: Double
+
+        public init(enabled: Bool, spectralSensitivity: Double, prnuAbsenceThreshold: Double, singleSignalWeight: Double) {
+            self.enabled = enabled
+            self.spectralSensitivity = spectralSensitivity
+            self.prnuAbsenceThreshold = prnuAbsenceThreshold
+            self.singleSignalWeight = singleSignalWeight
+        }
+
+        /// Standalone defaults, for the same reason as `TilingConfig.default`.
+        public static let `default` = AIGeneratedConfig(enabled: true, spectralSensitivity: 0.5, prnuAbsenceThreshold: 0.5, singleSignalWeight: 0)
+    }
+
     /// Settings for the tiling layer (see `Sources/ForensicLens/Tiling`)
     /// that splits a large image into overlapping tiles before handing it
     /// to the analyzers above, rather than processing the whole decoded
@@ -415,8 +454,9 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public var cfa: CFAConfig
     public var jpegGhost: JPEGGhostConfig
     public var thumbnail: ThumbnailConfig
+    public var aiGenerated: AIGeneratedConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default, thumbnail: ThumbnailConfig = ThumbnailConfig.default) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default, thumbnail: ThumbnailConfig = ThumbnailConfig.default, aiGenerated: AIGeneratedConfig = AIGeneratedConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
@@ -426,6 +466,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         self.cfa = cfa
         self.jpegGhost = jpegGhost
         self.thumbnail = thumbnail
+        self.aiGenerated = aiGenerated
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -470,6 +511,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         prnu: PRNUConfig.default,
         cfa: CFAConfig.default,
         jpegGhost: JPEGGhostConfig.default,
-        thumbnail: ThumbnailConfig.default
+        thumbnail: ThumbnailConfig.default,
+        aiGenerated: AIGeneratedConfig.default
     )
 }
