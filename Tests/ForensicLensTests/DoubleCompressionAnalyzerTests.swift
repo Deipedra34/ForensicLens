@@ -162,6 +162,7 @@ final class DoubleCompressionAnalyzerTests: XCTestCase {
         config.cfa.enabled = false
         config.jpegGhost.enabled = false
         config.thumbnail.enabled = false
+        config.aiGenerated.enabled = false
 
         let engine = ForensicLensEngine(config: config)
         let image = jpegImage(try Fixtures.uniformBuffer(width: 32, height: 32))
