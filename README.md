@@ -11,7 +11,7 @@
 
 # ForensicLens
 
-A Swift library and CLI for spotting signs of digital manipulation in still images. It runs eight independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, double JPEG compression detection, PRNU sensor-noise analysis, CFA demosaicing consistency, JPEG ghost detection, and EXIF thumbnail consistency) and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
+A Swift library and CLI for spotting signs of digital manipulation in still images. It runs eight independent forensic techniques (Error Level Analysis, EXIF/metadata inconsistency checks, copy-move/clone detection, double JPEG compression detection, PRNU sensor-noise analysis, CFA demosaicing consistency, JPEG ghost detection, and EXIF thumbnail consistency), plus a check for statistical signals consistent with a fully AI-generated image, and rolls the results into a single 0-100 suspicion score plus an itemized, human-readable report.
 
 Pure Swift and C, no Apple-only frameworks. Builds and tests on macOS and Linux. Reads BMP and PPM/PGM natively, JPEG metadata, and HEIF/HEIC (the iPhone default) and WebP through libheif and libwebp when they're installed. See [Supported Formats](#supported-formats).
 
@@ -28,6 +28,10 @@ None of these methods are conclusive on their own, and each one is blind to a di
 
 - **JPEG ghost detection** catches a region that was JPEG-compressed at a different quality than the rest of the image, typically a patch spliced in from another JPEG. ELA shows that a region's error level differs, and double-compression detection says whether the whole image was saved twice; this names the region and the quality it came from. It needs JPEG-derived pixels and reports "not applicable" on anything else.
 - **EXIF thumbnail consistency** catches a JPEG whose main image no longer matches the small preview the camera embedded at capture, or has a different shape. That happens when an editor changed the picture but carried the old EXIF block along, or the file was assembled from two sources. It needs a file that still has its camera thumbnail, and many don't.
+
+All eight assume a real photo that may have been edited. One more check asks whether there's a real photo underneath at all:
+
+- **AI-generated image signals** look for two classical statistical traces of GAN/diffusion generation: periodic spectral peaks left by upsampling layers, and the absence of camera sensor noise anywhere in the frame. By default both must agree before it scores. It's not a trained classifier, it misses many generated images, and it reports signals rather than verdicts. See [AI-Generated Image Detection](#ai-generated-image-detection).
 
 Run all eight and combine the results, and you catch a wider range of edits than any single technique would on its own. That's the whole point of `SuspicionScorer`.
 
@@ -58,6 +62,7 @@ flowchart TB
         CFA[CFAAnalyzer]
         Ghost[JPEGGhostAnalyzer]
         Thumb[ThumbnailConsistencyAnalyzer]
+        AIGen[AIGeneratedImageAnalyzer]
         Scorer[SuspicionScorer]
         Config[ForensicLensConfig]
     end
@@ -82,6 +87,7 @@ flowchart TB
     ImageData --> CFA
     ImageData --> Ghost
     ImageData --> Thumb
+    ImageData --> AIGen
     Analyzer -.conforms.-> ELA
     Analyzer -.conforms.-> Meta
     Analyzer -.conforms.-> Clone
@@ -90,6 +96,7 @@ flowchart TB
     Analyzer -.conforms.-> CFA
     Analyzer -.conforms.-> Ghost
     Analyzer -.conforms.-> Thumb
+    Analyzer -.conforms.-> AIGen
     Config --> ELA
     Config --> Meta
     Config --> Clone
@@ -98,6 +105,7 @@ flowchart TB
     Config --> CFA
     Config --> Ghost
     Config --> Thumb
+    Config --> AIGen
     ELA --> Scorer
     Meta --> Scorer
     Clone --> Scorer
@@ -106,6 +114,7 @@ flowchart TB
     CFA --> Scorer
     Ghost --> Scorer
     Thumb --> Scorer
+    AIGen --> Scorer
     Scorer --> Report
     Report --> HTML
     ImageData --> HTML
@@ -129,6 +138,7 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 | CFA Demosaicing Consistency | Blocks missing the period-2 Bayer interpolation pattern the rest of the image shows, or carrying it on a shifted grid | Yes (RGB only) | No |
 | JPEG Ghost Detection | Blocks whose JPEG "ghost" (the quality at which re-compression changes them least) differs from the rest of the image's | Yes (JPEG-derived only; not applicable to HEIF/WebP) | No |
 | EXIF Thumbnail Consistency | An embedded EXIF thumbnail whose content or aspect ratio no longer matches the main image | No for JPEG (decodes it itself); yes for HEIF/WebP | Yes (JPEG, HEIF, or WebP with a thumbnail) |
+| AI-Generated Image Signals | Statistical signals consistent with GAN/diffusion generation: upsampling-lattice spectral peaks plus no camera sensor noise anywhere in the frame (classical signal analysis, not a classifier; signals, not verdicts) | Yes | No |
 
 | Capability | Status |
 |---|---|
@@ -150,7 +160,7 @@ Text and JSON reports say *what* was flagged; the HTML report shows *where*. `--
 
 - **Suspicion score** and verdict at the top, color-coded by severity.
 - **The analyzed image**, embedded directly in the page as a base64 `data:` URI (BMP, JPEG, and WebP are embedded byte-for-byte; PPM/PGM and HEIF/HEIC, which most browsers can't display, are converted to BMP from the already-decoded pixels).
-- **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from, green for PRNU sensor-noise analysis (one box per noise-inconsistent block, plus the analyzed area when an image fails a `--reference` camera check), pink for CFA demosaicing consistency (one box per block whose Bayer pattern is missing or misaligned), teal for JPEG ghost detection (one box per block compressed at a different quality than the rest of the image), and indigo for EXIF thumbnail consistency, one box around the part of the image that differs most from its thumbnail.
+- **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from, green for PRNU sensor-noise analysis (one box per noise-inconsistent block, plus the analyzed area when an image fails a `--reference` camera check), pink for CFA demosaicing consistency (one box per block whose Bayer pattern is missing or misaligned), teal for JPEG ghost detection (one box per block compressed at a different quality than the rest of the image), indigo for EXIF thumbnail consistency, one box around the part of the image that differs most from its thumbnail, and amber for AI-generated image signals, one box around the crop whose spectrum showed upsampling-lattice peaks.
 - **A checkbox per analyzer** above the image to show or hide that layer (a few lines of inline JavaScript, no libraries), plus a legend mapping each color to its analyzer.
 - **The full findings breakdown** below the image: analyzer name, score, summary, and every indicator with its region coordinates -- the same information as the text/JSON report.
 
