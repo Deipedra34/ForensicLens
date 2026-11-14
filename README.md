@@ -697,6 +697,19 @@ forensiclens-cli aigenerated render.bmp
 forensiclens-cli report render.bmp --html-report report.html   # analyzed crop drawn in amber when flagged
 ```
 
+### Limitations of AI-generated image detection
+
+These are inherent to the approach, not bugs waiting for a fix:
+
+- **It's not a trained classifier.** It measures two hand-picked statistical traces. It has never seen a generated image, has no notion of what generated content "looks like", and knows nothing about faces, lighting, anatomy, text, or semantic plausibility.
+- **It under-detects.** Newer and less common generative models often avoid checkerboard artifacts entirely (anti-aliased or resize-then-convolve upsampling, latent-diffusion decoders whose traces don't fall on the 2/4/8-pixel lattice), and many produce texture that passes for sensor noise. Expect many generated images to score 0. **A score of 0 is not evidence that an image is a real photo.**
+- **It will likely get worse over time.** As generators evolve to reduce exactly these traces, with better upsampling and synthetic noise or simulated camera pipelines, both signals fade. The thresholds were set on synthetic fixtures, not on a benchmark of current generators, and nothing here adapts on its own.
+- **Post-processing erases the evidence.** Resizing, recompression, cropping off the original grid, filtering, or screenshotting a generated image can remove its spectral peaks. The PRNU-absence signal is only as good as the noise that survives, and heavy compression destroys real cameras' noise too.
+- **Innocent images can trip one signal, occasionally both.** Spectral peaks come from JPEG grids, demosaicing, resampling, and periodic scenes. Missing sensor noise comes from screenshots, graphics, scans, and heavily processed photos. A heavily processed screenshot of a repeating pattern can, in principle, trip both. The default rule requires both signals to agree for exactly this reason, and raising `singleSignalWeight` makes false positives more likely.
+- **Only one crop's spectrum is examined.** The spectral check looks at the centered 512x512 (at most) crop at native resolution, so an artifact confined to the image's edges is missed. A partially generated image (an inpainted region in a real photo) keeps the real photo's sensor noise, and is the local detectors' job, not this one's.
+
+Treat a positive result as a reason to look closer, with other evidence and your own judgment, never as proof. Treat a negative result as no information at all.
+
 ### Signal 1: spectral upsampling artifacts
 
 Generators build an image up from a small latent through repeated 2x upsampling: transposed convolutions, or nearest-neighbor or pixel-shuffle upsampling followed by convolutions. Each of those layers treats output pixels differently depending on their position modulo the upsampling factor. That leaves a faint pattern that repeats every 2, 4, or 8 pixels, the well-known "checkerboard artifact". In the Fourier spectrum, a pattern with period `p` puts sharp peaks at bins that are multiples of `N/p`, while camera noise and natural texture spread their energy smoothly.
