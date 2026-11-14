@@ -686,6 +686,72 @@ The result is one whole-image finding, not a per-block map: there's one thumbnai
 
 **Cost.** One header parse, a full decode of a ~160x120 thumbnail, and an entropy decode of the main image without inverse transforms. That's linear in file size, and much cheaper than any pixel analyzer. It doesn't appear in the benchmark table, whose synthetic PPM images carry no EXIF.
 
+## AI-Generated Image Detection
+
+Every other pixel analyzer here assumes a real photograph that may have been *edited*, and looks for the edit. But many manipulated images today aren't edits of a real photo at all: a GAN or diffusion model generated the whole thing. `AIGeneratedImageAnalyzer` (`aigenerated`) asks that different question: does this image show statistical signals consistent with having been generated, rather than captured by a camera?
+
+> **Read this as a hint, not a verdict.** This check uses classical statistical signal analysis, not a trained classifier. It looks for two specific traces that some generators leave. It will miss many generated images, especially from newer or less common models, and some ordinary images carry one of the traces too. Every result is worded as "signals consistent with AI generation", never "this image is AI-generated". Read [the limitations](#limitations-of-ai-generated-image-detection) before relying on it.
+
+```sh
+forensiclens-cli aigenerated render.bmp
+forensiclens-cli report render.bmp --html-report report.html   # analyzed crop drawn in amber when flagged
+```
+
+### Signal 1: spectral upsampling artifacts
+
+Generators build an image up from a small latent through repeated 2x upsampling: transposed convolutions, or nearest-neighbor or pixel-shuffle upsampling followed by convolutions. Each of those layers treats output pixels differently depending on their position modulo the upsampling factor. That leaves a faint pattern that repeats every 2, 4, or 8 pixels, the well-known "checkerboard artifact". In the Fourier spectrum, a pattern with period `p` puts sharp peaks at bins that are multiples of `N/p`, while camera noise and natural texture spread their energy smoothly.
+
+`SpectralArtifactDetector` measures exactly that:
+
+1. It takes the largest centered power-of-two square of the luminance that fits, from 64x64 up to 512x512, **at native resolution**. Resampling would imprint a new periodic structure and wipe out the one being measured.
+2. It high-passes that crop (each pixel minus its 3x3 mean), so the strong low-frequency slope of natural images doesn't bury fine-detail peaks.
+3. It applies a 2D Hann window and computes the power spectrum with the package's shared FFT (`Sources/ForensicLens/FrequencyDomain`).
+4. At every frequency on the 2-, 4- and 8-pixel lattices (every multiple of `N/8` on both axes, one per conjugate pair), it divides the strongest power within one bin by the median power of the ring of bins around it (distance 2 to 4).
+5. It compares the strongest ratio against a threshold of `10^(2 - spectralSensitivity)`, about 32x by default. Power in a noise-like bin is roughly exponentially distributed, so chance peaks on the camera-like test images stay around 7x to 13x. Below the threshold the spectral signal is exactly 0. At the threshold it's 0.5, and it rises with the logarithm of the excess to 1 at 30x the threshold.
+
+### Signal 2: no camera sensor-noise fingerprint anywhere (PRNU absence)
+
+A camera image carries sensor noise across its whole frame: shot noise, read noise, and the sensor's PRNU pattern. That stays true even after part of the image has been edited, because the untouched regions keep it. A generated image never passed through a sensor.
+
+`PRNUGlobalPresence` reuses the PRNU module wholesale: the same luminance plane, working-resolution downsampling, wavelet noise residual, 12-lag block noise signatures, and clipped-block filter as [PRNU Analysis](#prnu-analysis). For each block it asks one absolute question: **does this block's residual look like sensor noise at all?** To pass, the residual needs a standard deviation of at least 0.6 gray levels (8-bit rounding alone leaves about 0.29). It also needs no correlation coefficient beyond ±0.7 at any short lag. Sensor noise is close to white, while smooth synthetic texture, upsampled noise, and periodic patterns are not. *Coverage* is the share of usable blocks that pass. Below `prnuAbsenceThreshold` (default 0.5), the absence signal rises linearly, from 0 at the threshold to 1 at zero coverage.
+
+**How this differs from the existing PRNU detector.** `PRNUAnalyzer`'s local consistency check asks whether any block's noise *disagrees* with the rest of the image. It uses the image's own aggregate noise as the reference and flags outliers, which is right for a real photo with a pasted-in region. An image whose noise is absent *everywhere* has no outliers, so that check correctly calls it consistent and scores 0. That's exactly the profile of a fully synthetic image. The global check fills the gap with an absolute test that doesn't depend on the rest of the image. It stays quiet on a locally tampered camera photo, because most of that photo's blocks still carry sensor noise. The two share every building block and complement each other: local consistency catches a fake *region* in a real photo, and global absence catches a frame with no real photo underneath.
+
+The tests check this directly. On the synthetic "generated" fixture, the local check flags no blocks while the global check flags the whole image. On a camera image with a noise-free patch spliced in, the global check stays at 0 and leaves the patch to the local check.
+
+### Combining the two signals
+
+`AIGenerationScore` combines the spectral signal `s` and the absence signal `a`, both 0 to 1:
+
+```
+likelihood = min(s, a) + singleSignalWeight * (max(s, a) - min(s, a))
+score      = 75 * likelihood
+```
+
+The weaker signal sets a floor, and the stronger one adds `singleSignalWeight` of whatever it has beyond that:
+
+| `singleSignalWeight` | Rule | Spectral only (`s=1, a=0`) | Absence only (`s=0, a=1`) | Both (`s=1, a=1`) |
+|---|---|:---:|:---:|:---:|
+| `0` (default) | both must agree: `min(s, a)` | 0 | 0 | 75 |
+| `0.5` | average | 37.5 | 37.5 | 75 |
+| `1` | either suffices: `max(s, a)` | 75 | 75 | 75 |
+
+**Why both must agree by default.** Each signal on its own has common innocent causes. Lattice-frequency peaks also come from JPEG's 8x8 block grid, a camera's color-filter-array demosaicing (a period-2 pattern), resampling, and genuinely periodic scenes like fabric, fences, or a screen photographed up close. Missing sensor noise also describes screenshots, graphics, scans, heavily compressed or denoised photos, and downscaled web copies. Ordinary images rarely show *both*. Raising `singleSignalWeight` adds sensitivity to generators that leave only one trace, at the cost of more false positives.
+
+The finding feeds `SuspicionScorer` like any other analyzer. Its maximum of 75 is in the "likely manipulated" band, but below the 90s that conclusive evidence like an exact clone match can reach. A signal that couldn't be measured (an image under 64x64, flat, or mostly clipped) enters the rule as 0, so missing data never adds evidence. If neither check can run, the result is "Not assessed (low confidence)" with score 0. Each signal also gets its own indicator in the report, with its raw measurement: the strongest peak ratio against its threshold, and the sensor-noise coverage and median level. So a reviewer can see *which* trace was present even when the combined score is 0.
+
+```yaml
+aiGenerated:
+  enabled: true
+  spectralSensitivity: 0.5     # peak must be 10^(2 - this)x its background: 100x at 0, ~32x at 0.5, 10x at 1
+  prnuAbsenceThreshold: 0.5    # share of blocks that must carry sensor-like noise; 0 disables the signal
+  singleSignalWeight: 0        # 0 = both must agree, 0.5 = average, 1 = either suffices
+```
+
+The PRNU-absence check uses `prnu.blockSize` and `prnu.maximumWorkingDimension`, so both PRNU-based checks see the image the same way.
+
+**Cost.** One forward 2D FFT of at most 512x512, plus one PRNU residual extraction at PRNU's working resolution, which is about the cost of PRNU's local check. It runs as a single block, outside the tiling layer, because both signals are image-wide.
+
 ## Supported Formats
 
 ForensicLens identifies a file's format from its contents (magic numbers and container headers), never from its name. Extensions only decide which files `batch` and `forensiclens-eval` pick up from a directory.
