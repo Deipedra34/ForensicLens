@@ -389,4 +389,50 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(error as? ConfigError, .unknownKey(section: "prnu", key: "waveletLevels"))
         }
     }
+
+    // MARK: - AI-generated image detection
+
+    func testAIGeneratedCheckIsOnByDefaultAndRequiresBothSignals() {
+        XCTAssertEqual(
+            ForensicLensConfig.default.aiGenerated,
+            ForensicLensConfig.AIGeneratedConfig(enabled: true, spectralSensitivity: 0.5, prnuAbsenceThreshold: 0.5, singleSignalWeight: 0)
+        )
+        XCTAssertEqual(ForensicLensConfig.default.aiGenerated.singleSignalWeight, 0, "both signals must agree by default")
+    }
+
+    func testParsingFullAIGeneratedSection() throws {
+        let yaml = """
+        aiGenerated:
+          enabled: false
+          spectralSensitivity: 0.8
+          prnuAbsenceThreshold: 0.3
+          singleSignalWeight: 0.5
+        """
+        let config = try ConfigLoader.parse(yaml)
+        XCTAssertEqual(config.aiGenerated, ForensicLensConfig.AIGeneratedConfig(enabled: false, spectralSensitivity: 0.8, prnuAbsenceThreshold: 0.3, singleSignalWeight: 0.5))
+        XCTAssertEqual(config.prnu, ForensicLensConfig.default.prnu, "other sections keep their defaults")
+    }
+
+    func testShippedConfigFileDocumentsTheAIGeneratedDefaults() throws {
+        let path = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("forensiclens.yaml")
+            .path
+        let config = try ConfigLoader.load(contentsOfFile: path)
+        XCTAssertEqual(config.aiGenerated, ForensicLensConfig.default.aiGenerated)
+    }
+
+    func testAIGeneratedInvalidValueAndUnknownKeyThrow() {
+        XCTAssertThrowsError(try ConfigLoader.parse("aiGenerated:\n  spectralSensitivity: maximum")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "spectralSensitivity", value: "maximum"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("aiGenerated:\n  enabled: sometimes")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "enabled", value: "sometimes"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("aiGenerated:\n  classifier: resnet")) { error in
+            XCTAssertEqual(error as? ConfigError, .unknownKey(section: "aiGenerated", key: "classifier"))
+        }
+    }
 }
