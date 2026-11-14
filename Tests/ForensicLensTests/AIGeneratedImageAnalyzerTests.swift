@@ -78,6 +78,42 @@ final class AIGeneratedImageAnalyzerTests: XCTestCase {
         XCTAssertEqual(either.score, 75, accuracy: 1e-9)
     }
 
+    // MARK: - Pipeline integration
+
+    func testEngineFeedsTheFindingIntoTheSuspicionScore() throws {
+        let image = try Fixtures.imageData(Fixtures.likelyGeneratedImage())
+        let report = ForensicLensEngine().run(on: image)
+        let finding = try XCTUnwrap(report.findings.first { $0.analyzerID == "aigenerated" })
+        XCTAssertEqual(finding.score, 75, accuracy: 1e-9)
+        XCTAssertGreaterThanOrEqual(report.overallScore, finding.score)
+        XCTAssertEqual(report.verdict, "likely manipulated")
+        XCTAssertTrue(report.textReport.contains("[aigenerated] score 75/100"), report.textReport)
+    }
+
+    func testEngineLeavesACameraImageUnaffected() throws {
+        let image = try Fixtures.imageData(Fixtures.likelyCameraImage())
+        let report = ForensicLensEngine().run(on: image, only: ["aigenerated"])
+        XCTAssertEqual(report.findings.map(\.analyzerID), ["aigenerated"])
+        XCTAssertEqual(report.overallScore, 0)
+    }
+
+    func testDisabledInConfigSkipsTheAnalyzer() throws {
+        var config = ForensicLensConfig.default
+        config.aiGenerated.enabled = false
+        let engine = ForensicLensEngine(config: config)
+        let report = engine.run(on: try Fixtures.imageData(Fixtures.likelyGeneratedImage()))
+        XCTAssertFalse(report.findings.contains { $0.analyzerID == "aigenerated" })
+        XCTAssertTrue(engine.availableAnalyzerIDs.contains("aigenerated"))
+    }
+
+    func testTilingDoesNotChangeTheResult() throws {
+        let image = try Fixtures.imageData(Fixtures.likelyGeneratedImage())
+        let engine = ForensicLensEngine()
+        let untiled = engine.run(on: image, only: ["aigenerated"], tiling: TilingOverride(disableTiling: true))
+        let tiled = engine.run(on: image, only: ["aigenerated"], tiling: TilingOverride(forcedTileSize: 64))
+        XCTAssertEqual(untiled.findings, tiled.findings)
+    }
+
     // MARK: - Wording
 
     func testWordingNeverClaimsACertainVerdict() throws {
