@@ -114,6 +114,33 @@ final class AIGeneratedImageAnalyzerTests: XCTestCase {
         XCTAssertEqual(untiled.findings, tiled.findings)
     }
 
+    // MARK: - Degenerate input
+
+    func testTinyImageGivesALowConfidenceResultInsteadOfCrashing() throws {
+        for (width, height) in [(1, 1), (8, 8), (40, 300)] {
+            let buffer = try PixelBuffer(width: width, height: height, channels: 3, pixels: [UInt8](repeating: 128, count: width * height * 3))
+            let finding = try analyze(buffer, singleSignalWeight: 1)
+            XCTAssertEqual(finding.score, 0, "\(width)x\(height)")
+            XCTAssertTrue(finding.summary.hasPrefix("Not assessed (low confidence)"), finding.summary)
+            XCTAssertTrue(finding.indicators.allSatisfy { $0.weight == 0 })
+        }
+    }
+
+    func testFlatImageNeverScores() throws {
+        let flat = try PixelBuffer(width: 256, height: 256, channels: 1, pixels: [UInt8](repeating: 77, count: 256 * 256))
+        XCTAssertEqual(try analyze(flat, singleSignalWeight: 0).score, 0)
+    }
+
+    func testImageWithoutPixelsIsUnsupported() throws {
+        let image = try ImageData.load(Fixtures.jpegBytesWithNoExif())
+        XCTAssertNil(image.pixels)
+        XCTAssertThrowsError(try AIGeneratedImageAnalyzer().analyze(image, config: .default)) { error in
+            guard case .unsupportedInput = error as? AnalyzerError else {
+                return XCTFail("expected unsupportedInput, got \(error)")
+            }
+        }
+    }
+
     // MARK: - Wording
 
     func testWordingNeverClaimsACertainVerdict() throws {
