@@ -83,6 +83,37 @@ final class SpectralArtifactDetectorTests: XCTestCase {
         XCTAssertEqual(measurement.artifactScore(sensitivity: 0.5), 0)
     }
 
+    // MARK: - Degenerate input
+
+    func testTooSmallImagesAreInsufficientNotCrashes() throws {
+        for (width, height) in [(1, 1), (10, 10), (63, 63), (500, 40)] {
+            let buffer = try PixelBuffer(width: width, height: height, channels: 1, pixels: [UInt8](repeating: 90, count: width * height))
+            let measurement = measure(buffer)
+            guard case .insufficientData(let reason) = measurement.status else {
+                return XCTFail("\(width)x\(height) should be insufficient, got \(measurement.status)")
+            }
+            XCTAssertTrue(reason.contains("smaller"), reason)
+            XCTAssertTrue(measurement.peaks.isEmpty)
+            XCTAssertNil(measurement.analyzedRegion)
+            XCTAssertEqual(measurement.artifactScore(sensitivity: 1), 0)
+        }
+    }
+
+    func testFlatImageIsInsufficient() throws {
+        let measurement = measure(try PixelBuffer(width: 128, height: 128, channels: 3, pixels: [UInt8](repeating: 200, count: 128 * 128 * 3)))
+        guard case .insufficientData(let reason) = measurement.status else {
+            return XCTFail("a flat image should be insufficient, got \(measurement.status)")
+        }
+        XCTAssertTrue(reason.contains("flat"), reason)
+        XCTAssertEqual(measurement.artifactScore(sensitivity: 1), 0)
+    }
+
+    func testEmptyPlaneIsInsufficient() {
+        let measurement = SpectralArtifactDetector.measure(PRNUPlane(width: 0, height: 0))
+        XCTAssertFalse(measurement.isMeasured)
+        XCTAssertNil(measurement.strongestPeak)
+    }
+
     // MARK: - Sensitivity and score shape
 
     func testThresholdFollowsSensitivityAndIsClamped() {
