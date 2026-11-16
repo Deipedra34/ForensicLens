@@ -282,6 +282,41 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         public static let `default` = CFAConfig(enabled: true, blockSize: 64, consistencyThreshold: 0.3)
     }
 
+    /// Settings for `NoiseLevelAnalyzer`.
+    public struct NoiseLevelConfig: Codable, Equatable, Sendable {
+        /// Whether the noise-level consistency check runs as part of a
+        /// combined report. It's the cheapest pixel analyzer, so it can
+        /// stay on even when the heavier ones are turned off for speed.
+        public var enabled: Bool
+
+        /// Side length, in pixels, of each block whose noise level is
+        /// compared against the rest of the image. Larger blocks give a
+        /// steadier estimate but localize less precisely. Raised to at
+        /// least 16.
+        public var blockSize: Int
+
+        /// A block whose noise level is below this fraction of the image's
+        /// typical level is flagged as too smooth (denoised, blurred,
+        /// rendered, or from a cleaner source). Higher is more sensitive.
+        /// Kept within 0.01...0.99.
+        public var smoothThreshold: Double
+
+        /// A block whose noise level is above this multiple of the image's
+        /// typical level is flagged as too noisy (from a noisier source, or
+        /// with added noise). Lower is more sensitive. At least 1.01.
+        public var noisyThreshold: Double
+
+        public init(enabled: Bool, blockSize: Int, smoothThreshold: Double, noisyThreshold: Double) {
+            self.enabled = enabled
+            self.blockSize = blockSize
+            self.smoothThreshold = smoothThreshold
+            self.noisyThreshold = noisyThreshold
+        }
+
+        /// Standalone defaults, for the same reason as `TilingConfig.default`.
+        public static let `default` = NoiseLevelConfig(enabled: true, blockSize: 64, smoothThreshold: 0.5, noisyThreshold: 2.0)
+    }
+
     /// Settings for `JPEGGhostAnalyzer`.
     public struct JPEGGhostConfig: Codable, Equatable, Sendable {
         /// Whether JPEG ghost detection runs as part of a combined report.
@@ -455,8 +490,9 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public var jpegGhost: JPEGGhostConfig
     public var thumbnail: ThumbnailConfig
     public var aiGenerated: AIGeneratedConfig
+    public var noiseLevel: NoiseLevelConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default, thumbnail: ThumbnailConfig = ThumbnailConfig.default, aiGenerated: AIGeneratedConfig = AIGeneratedConfig.default) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default, thumbnail: ThumbnailConfig = ThumbnailConfig.default, aiGenerated: AIGeneratedConfig = AIGeneratedConfig.default, noiseLevel: NoiseLevelConfig = NoiseLevelConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
@@ -467,6 +503,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         self.jpegGhost = jpegGhost
         self.thumbnail = thumbnail
         self.aiGenerated = aiGenerated
+        self.noiseLevel = noiseLevel
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -512,6 +549,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         cfa: CFAConfig.default,
         jpegGhost: JPEGGhostConfig.default,
         thumbnail: ThumbnailConfig.default,
-        aiGenerated: AIGeneratedConfig.default
+        aiGenerated: AIGeneratedConfig.default,
+        noiseLevel: NoiseLevelConfig.default
     )
 }
