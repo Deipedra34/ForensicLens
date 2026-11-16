@@ -108,4 +108,35 @@ enum NoiseDeviation {
             return max(0, min(1, log(ratio / cutoffs.upper) / log(2)))
         }
     }
+
+    /// How close a flagged block's noise must be to what its brightness
+    /// alone predicts (as a factor either way) to count as explained by
+    /// exposure.
+    static let exposureTolerance = 1.5
+
+    /// Whether a flagged block's deviation is what ordinary photon shot
+    /// noise would produce at its brightness, rather than a sign of
+    /// different content.
+    ///
+    /// A sensor's shot noise has a variance proportional to the light it
+    /// collected, so its standard deviation grows with the square root of
+    /// brightness: an untouched photo's shadows are less noisy than its
+    /// highlights. A block counts as explained when it's darker than
+    /// typical and too smooth (or brighter and too noisy), and its noise
+    /// ratio lies within `exposureTolerance` of `sqrt(blockLuma /
+    /// typicalLuma)`. Explained blocks are still reported, with less weight:
+    /// a splice can happen to land in a shadow, and real sensors add read
+    /// noise and tone curves that bend this model. A ratio of 0 (no noise
+    /// at all) is never explained, since even the darkest real pixels carry
+    /// some.
+    static func exposureExplained(ratio: Double, direction: NoiseDeviationDirection, blockLuma: Double, typicalLuma: Double) -> Bool {
+        guard ratio > 0, ratio.isFinite, blockLuma.isFinite, typicalLuma.isFinite else { return false }
+        let expected = (max(blockLuma, 1) / max(typicalLuma, 1)).squareRoot()
+        switch direction {
+        case .tooSmooth: guard expected < 1 else { return false }
+        case .tooNoisy: guard expected > 1 else { return false }
+        }
+        let mismatch = ratio / expected
+        return mismatch >= 1 / exposureTolerance && mismatch <= exposureTolerance
+    }
 }
