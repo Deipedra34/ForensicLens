@@ -90,4 +90,28 @@ final class NoiseDeviationTests: XCTestCase {
         XCTAssertEqual(NoiseDeviation.severity(ratio: 100, direction: .tooNoisy, cutoffs: cutoffs), 1)
         XCTAssertEqual(NoiseDeviation.severity(ratio: 1.5, direction: .tooNoisy, cutoffs: cutoffs), 0)
     }
+
+    // MARK: - Exposure-dependent noise
+
+    func testDeviationsMatchingBrightnessAreExplainedByExposure() {
+        // A block at a quarter of the typical brightness has, under shot
+        // noise, half the typical noise.
+        XCTAssertTrue(NoiseDeviation.exposureExplained(ratio: 0.45, direction: .tooSmooth, blockLuma: 30, typicalLuma: 120))
+        // Four times as bright: twice the noise.
+        XCTAssertTrue(NoiseDeviation.exposureExplained(ratio: 2.2, direction: .tooNoisy, blockLuma: 240, typicalLuma: 60))
+    }
+
+    func testDeviationsBrightnessDoesNotAccountForAreNotExplained() {
+        XCTAssertFalse(NoiseDeviation.exposureExplained(ratio: 0.1, direction: .tooSmooth, blockLuma: 30, typicalLuma: 120),
+                       "far smoother than a shadow at that brightness would be")
+        XCTAssertFalse(NoiseDeviation.exposureExplained(ratio: 0.3, direction: .tooSmooth, blockLuma: 120, typicalLuma: 120),
+                       "a smooth block at typical brightness")
+        XCTAssertFalse(NoiseDeviation.exposureExplained(ratio: 0.4, direction: .tooSmooth, blockLuma: 240, typicalLuma: 120),
+                       "a bright block should be noisier, not smoother")
+        XCTAssertFalse(NoiseDeviation.exposureExplained(ratio: 3, direction: .tooNoisy, blockLuma: 30, typicalLuma: 120),
+                       "a dark block should be smoother, not noisier")
+        XCTAssertFalse(NoiseDeviation.exposureExplained(ratio: 0, direction: .tooSmooth, blockLuma: 1, typicalLuma: 200),
+                       "even the darkest real pixels carry some noise")
+        XCTAssertFalse(NoiseDeviation.exposureExplained(ratio: .nan, direction: .tooNoisy, blockLuma: 200, typicalLuma: 50))
+    }
 }
