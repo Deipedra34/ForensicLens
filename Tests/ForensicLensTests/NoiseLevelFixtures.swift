@@ -67,7 +67,23 @@ extension Fixtures {
         for y in 0..<height {
             let level = levels[min(levels.count - 1, y / max(1, bandHeight))]
             for x in 0..<width {
-                let base = level + 6 * sin(Double(x) / 37.0) + 4 * cos(Double(y) / 29.0)
+                let base = max(0, level + 6 * sin(Double(x) / 37.0) + 4 * cos(Double(y) / 29.0))
+                values[y * width + x] = base + noise(base) * nextGaussian(&generator)
+            }
+        }
+        return try eightBitBuffer(values, width: width, height: height, channels: 1)
+    }
+
+    /// A capture of a scene whose brightness at `(x, y)` is `level(x, y)`,
+    /// with Gaussian noise of standard deviation `noise(brightness)` at
+    /// every pixel: one camera's noise model applied everywhere, with no
+    /// edit. Used to place a natural shadow or highlight in a scene.
+    static func exposureImage(width: Int, height: Int, level: (Int, Int) -> Double, noise: (Double) -> Double, seed: UInt64 = 13) throws -> PixelBuffer {
+        var generator = SeededGenerator(seed: seed)
+        var values = [Double](repeating: 0, count: width * height)
+        for y in 0..<height {
+            for x in 0..<width {
+                let base = max(0, level(x, y) + 3 * sin(Double(x) / 41.0) + 2 * cos(Double(y) / 31.0))
                 values[y * width + x] = base + noise(base) * nextGaussian(&generator)
             }
         }
@@ -79,7 +95,7 @@ extension Fixtures {
         var pixels = [UInt8]()
         pixels.reserveCapacity(values.count * channels)
         for value in values {
-            let byte = UInt8(clamping: Int(value.rounded()))
+            let byte = value.isFinite ? UInt8(clamping: Int(value.rounded())) : 0
             for _ in 0..<channels { pixels.append(byte) }
         }
         return try PixelBuffer(width: width, height: height, channels: channels, pixels: pixels)
