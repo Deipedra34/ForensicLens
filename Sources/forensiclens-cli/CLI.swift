@@ -477,12 +477,16 @@ enum CLI {
           aigenerated         Run only the AI-generated image check (spectral
                                upsampling artifacts + absence of camera sensor
                                noise; signals, not a verdict).
+          noiselevel          Run only the noise-level consistency check (fast:
+                               flags blocks noticeably smoother or noisier than
+                               the rest of the image; a supporting signal and
+                               pre-check alongside prnu, not a replacement).
           batch               Scan directories and/or image files and print one summary report.
           formats             List the image formats this build handles, and whether the
                                libheif/libwebp libraries for HEIF/HEIC and WebP were found.
           help                Show this message.
 
-        OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail / aigenerated):
+        OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail / aigenerated / noiselevel):
           --json           Print the report as JSON instead of plain text.
           --html-report <path>
                            Also write a self-contained HTML report to <path>:
@@ -552,6 +556,7 @@ enum CLI {
           forensiclens-cli jpegghost photo-from-jpeg.bmp
           forensiclens-cli thumbnail camera-photo.jpg
           forensiclens-cli aigenerated render.bmp
+          forensiclens-cli noiselevel photo.ppm --html-report noise.html
           forensiclens-cli batch photos/
           forensiclens-cli batch photos/ --no-recursive --extensions bmp,ppm
           forensiclens-cli batch photos/ --format json --output report.json
