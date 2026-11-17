@@ -23,6 +23,67 @@ enum NoiseLevelEstimation {
     /// images fall below it.
     static let minimumMeasurableNoise = 0.05
 
+    /// Builds the noise-level map of `buffer` over non-overlapping
+    /// `blockSize` x `blockSize` blocks. Partial blocks at the right and
+    /// bottom edges are left out. Every measured block is compared with the
+    /// median of all of them (`NoiseBaseline`), using `NoiseDeviation`'s
+    /// cutoffs; flagged blocks are checked against the exposure model.
+    /// An image too small for one block, or with no measurable noise, gives
+    /// a map in which no block is judged.
+    static func map(_ buffer: PixelBuffer, blockSize: Int, smoothThreshold: Double, noisyThreshold: Double) -> NoiseLevelMap {
+        let columns = blockSize > 0 ? buffer.width / blockSize : 0
+        let rows = blockSize > 0 ? buffer.height / blockSize : 0
+        guard columns > 0, rows > 0 else {
+            return NoiseLevelMap(columns: 0, rows: 0, blocks: [], typicalSigma: 0, typicalLuma: 0)
+        }
+
+        var regions: [Region] = []
+        var measurements: [Measurement?] = []
+        regions.reserveCapacity(columns * rows)
+        measurements.reserveCapacity(columns * rows)
+        for row in 0..<rows {
+            for column in 0..<columns {
+                let region = Region(x: column * blockSize, y: row * blockSize, width: blockSize, height: blockSize)
+                regions.append(region)
+                measurements.append(measure(buffer, block: region))
+            }
+        }
+
+        let measured = measurements.compactMap { $0 }
+        let typicalLuma = PRNUCorrelation.median(measured.map(\.meanLuma)) ?? 0
+        let baseline = NoiseBaseline.of(measured.map(\.sigma))
+        let typicalSigma = baseline?.medianSigma ?? 0
+
+        // Without measurable noise there's nothing to compare against: every
+        // measured block keeps its sigma, but none is judged.
+        guard let baseline, typicalSigma >= minimumMeasurableNoise else {
+            let blocks = zip(regions, measurements).map { region, measurement in
+                NoiseBlockLevel(region: region, status: .unreliable, sigma: measurement?.sigma, ratio: nil, meanLuma: measurement?.meanLuma, exposureExplained: false)
+            }
+            return NoiseLevelMap(columns: columns, rows: rows, blocks: blocks, typicalSigma: typicalSigma, typicalLuma: typicalLuma)
+        }
+
+        let cutoffs = NoiseDeviation.cutoffs(for: baseline, smoothThreshold: smoothThreshold, noisyThreshold: noisyThreshold)
+        let blocks = zip(regions, measurements).map { region, measurement -> NoiseBlockLevel in
+            guard let measurement else {
+                return NoiseBlockLevel(region: region, status: .unreliable, sigma: nil, ratio: nil, meanLuma: nil, exposureExplained: false)
+            }
+            let ratio = baseline.ratio(of: measurement.sigma)
+            let direction = NoiseDeviation.classify(ratio: ratio, cutoffs: cutoffs)
+            let status: NoiseBlockLevel.Status
+            switch direction {
+            case .tooSmooth: status = .tooSmooth
+            case .tooNoisy: status = .tooNoisy
+            case nil: status = .consistent
+            }
+            let explained = direction.map {
+                NoiseDeviation.exposureExplained(ratio: ratio, direction: $0, blockLuma: measurement.meanLuma, typicalLuma: typicalLuma)
+            } ?? false
+            return NoiseBlockLevel(region: region, status: status, sigma: measurement.sigma, ratio: ratio, meanLuma: measurement.meanLuma, exposureExplained: explained)
+        }
+        return NoiseLevelMap(columns: columns, rows: rows, blocks: blocks, typicalSigma: typicalSigma, typicalLuma: typicalLuma)
+    }
+
     /// One block's measurement.
     struct Measurement: Sendable, Equatable {
         /// Robust noise standard deviation, in gray levels.
