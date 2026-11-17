@@ -87,7 +87,11 @@ enum TilingCoordinator {
     /// AI-generated image detection runs as a single block too: both of its
     /// signals are image-wide (one spectrum of a bounded center crop, and the
     /// share of the whole frame carrying sensor noise), and a per-tile pass
-    /// would only fragment them.
+    /// would only fragment them. The noise-level consistency check runs as
+    /// a single block for the same image-wide-baseline reason as CFA: every
+    /// block is compared with the median noise level of the whole image (a
+    /// tile lying inside a smoothed region would take that region as its
+    /// own normal), and it reads one block at a time, so memory stays small.
     /// Clone detection is dispatched to `TiledCloneDetection`
     /// instead of `SpatialTileMerger`, since its cross-tile correctness
     /// requirement (a source/copy pair split across two tiles must still
@@ -100,7 +104,7 @@ enum TilingCoordinator {
         }
 
         switch analyzer.identifier {
-        case "metadata", "prnu", "cfa", "jpegghost", "thumbnail", "aigenerated":
+        case "metadata", "prnu", "cfa", "jpegghost", "thumbnail", "aigenerated", "noiselevel":
             return try analyzer.analyze(image, config: config)
         case "clone":
             return try TiledCloneDetection.run(image: image, config: config)
