@@ -123,6 +123,8 @@ public enum ConfigLoader {
             try applyThumbnail(key: key, value: value, to: &config.thumbnail)
         case "aiGenerated":
             try applyAIGenerated(key: key, value: value, to: &config.aiGenerated)
+        case "noiseLevel":
+            try applyNoiseLevel(key: key, value: value, to: &config.noiseLevel)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -282,6 +284,21 @@ public enum ConfigLoader {
             thumbnail.similarityThreshold = try parseDouble(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "thumbnail", key: key)
+        }
+    }
+
+    private static func applyNoiseLevel(key: String, value: String, to noiseLevel: inout ForensicLensConfig.NoiseLevelConfig) throws {
+        switch key {
+        case "enabled":
+            noiseLevel.enabled = try parseBool(key: key, value: value)
+        case "blockSize":
+            noiseLevel.blockSize = try parseInt(key: key, value: value)
+        case "smoothThreshold":
+            noiseLevel.smoothThreshold = try parseDouble(key: key, value: value)
+        case "noisyThreshold":
+            noiseLevel.noisyThreshold = try parseDouble(key: key, value: value)
+        default:
+            throw ConfigError.unknownKey(section: "noiseLevel", key: key)
         }
     }
 
