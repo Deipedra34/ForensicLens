@@ -69,6 +69,13 @@ public struct NoiseLevelMap: Sendable, Equatable {
     /// The median mean luma of the measured blocks.
     public let typicalLuma: Double
 
+    /// The noise ratios outside which blocks were flagged: below
+    /// `smoothCutoff` too smooth, above `noisyCutoff` too noisy. These are
+    /// the configured thresholds, widened when the image's blocks naturally
+    /// vary more (see `NoiseDeviation.cutoffs`). 0 when no block was judged.
+    public let smoothCutoff: Double
+    public let noisyCutoff: Double
+
     /// How many blocks weren't mostly clipped, so had a noise level to
     /// measure.
     public var measuredBlockCount: Int {
@@ -91,11 +98,13 @@ public struct NoiseLevelMap: Sendable, Equatable {
         blocks.filter { $0.direction != nil }
     }
 
-    public init(columns: Int, rows: Int, blocks: [NoiseBlockLevel], typicalSigma: Double, typicalLuma: Double) {
+    public init(columns: Int, rows: Int, blocks: [NoiseBlockLevel], typicalSigma: Double, typicalLuma: Double, smoothCutoff: Double = 0, noisyCutoff: Double = 0) {
         self.columns = columns
         self.rows = rows
         self.blocks = blocks
         self.typicalSigma = typicalSigma
         self.typicalLuma = typicalLuma
+        self.smoothCutoff = smoothCutoff
+        self.noisyCutoff = noisyCutoff
     }
 }

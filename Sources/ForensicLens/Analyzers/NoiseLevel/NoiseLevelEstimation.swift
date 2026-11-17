@@ -81,7 +81,8 @@ enum NoiseLevelEstimation {
             } ?? false
             return NoiseBlockLevel(region: region, status: status, sigma: measurement.sigma, ratio: ratio, meanLuma: measurement.meanLuma, exposureExplained: explained)
         }
-        return NoiseLevelMap(columns: columns, rows: rows, blocks: blocks, typicalSigma: typicalSigma, typicalLuma: typicalLuma)
+        return NoiseLevelMap(columns: columns, rows: rows, blocks: blocks, typicalSigma: typicalSigma, typicalLuma: typicalLuma,
+                             smoothCutoff: cutoffs.lower, noisyCutoff: cutoffs.upper)
     }
 
     /// One block's measurement.
