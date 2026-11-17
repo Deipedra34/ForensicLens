@@ -435,4 +435,57 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(error as? ConfigError, .unknownKey(section: "aiGenerated", key: "classifier"))
         }
     }
+
+    // MARK: - Noise-level consistency
+
+    func testNoiseLevelCheckIsOnByDefault() {
+        XCTAssertEqual(
+            ForensicLensConfig.default.noiseLevel,
+            ForensicLensConfig.NoiseLevelConfig(enabled: true, blockSize: 64, smoothThreshold: 0.5, noisyThreshold: 2.0)
+        )
+    }
+
+    func testParsingFullNoiseLevelSection() throws {
+        let yaml = """
+        noiseLevel:
+          enabled: false
+          blockSize: 32
+          smoothThreshold: 0.3
+          noisyThreshold: 3
+        """
+        let config = try ConfigLoader.parse(yaml)
+        XCTAssertEqual(config.noiseLevel, ForensicLensConfig.NoiseLevelConfig(enabled: false, blockSize: 32, smoothThreshold: 0.3, noisyThreshold: 3))
+        XCTAssertEqual(config.prnu, ForensicLensConfig.default.prnu, "other sections keep their defaults")
+    }
+
+    func testPartialNoiseLevelSectionKeepsTheOtherDefaults() throws {
+        let config = try ConfigLoader.parse("noiseLevel:\n  noisyThreshold: 2.5")
+        XCTAssertEqual(config.noiseLevel.noisyThreshold, 2.5)
+        XCTAssertEqual(config.noiseLevel.smoothThreshold, ForensicLensConfig.default.noiseLevel.smoothThreshold)
+        XCTAssertTrue(config.noiseLevel.enabled)
+    }
+
+    func testShippedConfigFileDocumentsTheNoiseLevelDefaults() throws {
+        let path = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("forensiclens.yaml")
+            .path
+        let config = try ConfigLoader.load(contentsOfFile: path)
+        XCTAssertEqual(config.noiseLevel, ForensicLensConfig.default.noiseLevel)
+    }
+
+    func testNoiseLevelInvalidValueAndUnknownKeyThrow() {
+        XCTAssertThrowsError(try ConfigLoader.parse("noiseLevel:\n  smoothThreshold: low")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "smoothThreshold", value: "low"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("noiseLevel:\n  blockSize: 6.5")) { error in
+            XCTAssertEqual(error as? ConfigError, .invalidValue(key: "blockSize", value: "6.5"))
+        }
+        XCTAssertThrowsError(try ConfigLoader.parse("noiseLevel:\n  denoise: true")) { error in
+            XCTAssertEqual(error as? ConfigError, .unknownKey(section: "noiseLevel", key: "denoise"))
+        }
+    }
 }
+
