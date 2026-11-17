@@ -296,3 +296,29 @@ aiGenerated:
   # heavily processed images with no sensor noise). 0.5 averages them; 1
   # lets either decide alone.
   singleSignalWeight: 0
+
+noiseLevel:
+  # Whether to run the noise-level consistency check: a fast, lightweight
+  # complement to the prnu section, not a replacement for it. Each block's
+  # raw noise level (from a cheap 3x3 high-pass filter) is compared with the
+  # image's median; blocks with much less noise are flagged as too smooth
+  # (denoised, blurred, rendered, or from a cleaner source), blocks with much
+  # more as too noisy (from a noisier source, or with added noise). It's the
+  # cheapest pixel analyzer, so it can stay on as a pre-check even when the
+  # heavier ones (prnu, cfa, clone detection, jpegGhost) are turned off.
+  # A supporting signal: noise legitimately varies with brightness (shadows
+  # are less noisy than highlights) and texture, so it's more prone to false
+  # positives than PRNU, especially in high-dynamic-range photos.
+  enabled: true
+
+  # Side length, in pixels, of each compared block. Raised to at least 16.
+  blockSize: 64
+
+  # A block with less than this fraction of the image's typical noise level
+  # is flagged as too smooth. Higher is more sensitive (0.01 to 0.99).
+  smoothThreshold: 0.5
+
+  # A block with more than this multiple of the image's typical noise level
+  # is flagged as too noisy. Lower is more sensitive (at least 1.01). Both
+  # thresholds widen automatically in images whose blocks naturally vary a lot.
+  noisyThreshold: 2.0
