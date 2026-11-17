@@ -17,7 +17,7 @@ public struct ForensicLensEngine: Sendable {
     /// analyzers (ELA, metadata, clone detection, double-compression
     /// detection, PRNU sensor-noise analysis, CFA demosaicing consistency,
     /// JPEG ghost detection, EXIF thumbnail consistency, AI-generated image
-    /// signals).
+    /// signals, noise-level consistency).
     /// Individual analyzers are
     /// still subject to their `enabled` flag in `config` at run time.
     ///
@@ -29,7 +29,7 @@ public struct ForensicLensEngine: Sendable {
     ///   PRNU analysis's single-image consistency check only.
     public init(config: ForensicLensConfig = .default, prnuReference: PRNUReferenceFingerprint? = nil) {
         self.config = config
-        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(reference: prnuReference), CFAAnalyzer(), JPEGGhostAnalyzer(), ThumbnailConsistencyAnalyzer(), AIGeneratedImageAnalyzer()]
+        self.analyzers = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(reference: prnuReference), CFAAnalyzer(), JPEGGhostAnalyzer(), ThumbnailConsistencyAnalyzer(), AIGeneratedImageAnalyzer(), NoiseLevelAnalyzer()]
     }
 
     /// Runs every enabled analyzer against `image` and combines the results
@@ -87,6 +87,7 @@ public struct ForensicLensEngine: Sendable {
         case "jpegghost": return config.jpegGhost.enabled
         case "thumbnail": return config.thumbnail.enabled
         case "aigenerated": return config.aiGenerated.enabled
+        case "noiselevel": return config.noiseLevel.enabled
         default: return true
         }
     }
