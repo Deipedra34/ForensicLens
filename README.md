@@ -834,6 +834,20 @@ noiseLevel:
 
 Raising `smoothThreshold` or lowering `noisyThreshold` flags milder deviations; the two are independent, so you can, say, keep the "too noisy" side strict on images with lots of fine texture. Smaller blocks localize more precisely but give noisier estimates (each block's level comes from fewer pixels).
 
+### Performance of the noise-level check
+
+Per block, it reads the block's luma once (with a one-pixel border), runs the nine-tap high-pass filter, and finds the median absolute response by quickselect, in linear expected time, rather than sorting. That's linear in pixel count with no downsampling, no transform, and no padding, and memory stays at one block-sized plane at a time whatever the image size. Like PRNU and CFA, it runs outside the tiling layer, because every block is compared with one image-wide baseline.
+
+Measured in a release build on synthetic RGB noise images (Windows, x86-64, single-threaded, best of three runs; one run at 2048x2048). Absolute times will differ on your machine, but the ratios hold:
+
+| Image | Noise level | PRNU | CFA | ELA | Clone detection |
+|---|---:|---:|---:|---:|---:|
+| 512x512 | 4.9 ms | 43.8 ms | 40.3 ms | 138 ms | 333 ms |
+| 1024x1024 | 25.6 ms | 181 ms | 168 ms | 557 ms | 4.4 s |
+| 2048x2048 | 79 ms | 898 ms | 640 ms | 2.3 s | not run |
+
+That's roughly **7-11x cheaper than PRNU and 6-8x cheaper than CFA**, the two detectors it complements, and one to two orders of magnitude cheaper than ELA and clone detection. Above 2048px PRNU stops growing (it downsamples to `maximumWorkingDimension`) while this check keeps working at full resolution, so the gap narrows on very large images; it stays linear either way. `forensiclens-benchmark` times it alongside the other analyzers (the "Noise Level" rows of the [benchmark table](#benchmarking) after the next CI run).
+
 ## Supported Formats
 
 ForensicLens identifies a file's format from its contents (magic numbers and container headers), never from its name. Extensions only decide which files `batch` and `forensiclens-eval` pick up from a directory.
