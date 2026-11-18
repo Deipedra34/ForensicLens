@@ -223,12 +223,16 @@ COMMANDS:
   aigenerated         Run only the AI-generated image check (spectral
                        upsampling artifacts + absence of camera sensor
                        noise; signals, not a verdict).
+  noiselevel          Run only the noise-level consistency check (fast:
+                       flags blocks noticeably smoother or noisier than
+                       the rest of the image; a supporting signal and
+                       pre-check alongside prnu, not a replacement).
   batch               Scan directories and/or image files and print one summary report.
   formats             List the image formats this build handles, and whether the
                        libheif/libwebp libraries for HEIF/HEIC and WebP were found.
   help                Show usage.
 
-OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail / aigenerated):
+OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpegghost / thumbnail / aigenerated / noiselevel):
   --json           Print the report as JSON instead of plain text.
   --html-report <path>
                    Also write a self-contained HTML report to <path>:
@@ -319,6 +323,9 @@ forensiclens-cli thumbnail camera-photo.jpg
 
 # Signals consistent with a fully AI-generated image only
 forensiclens-cli aigenerated render.bmp
+
+# Noise-level consistency only: blocks too smooth or too noisy for the rest of the image
+forensiclens-cli noiselevel photo.ppm
 
 # Custom thresholds
 forensiclens-cli report photo.bmp --config strict.yaml
@@ -553,6 +560,12 @@ aiGenerated:
   spectralSensitivity: 0.5       # 0-1; lattice peak must be 10^(2 - this)x its spectral background (~32x)
   prnuAbsenceThreshold: 0.5      # 0-1; share of blocks that must carry sensor-like noise; 0 disables the signal
   singleSignalWeight: 0          # 0 = both signals must agree, 0.5 = average, 1 = either suffices
+
+noiseLevel:
+  enabled: true                  # cheapest pixel analyzer; can stay on with the heavy ones off
+  blockSize: 64                  # px per compared block (min 16)
+  smoothThreshold: 0.5           # below this fraction of the typical noise level = too smooth (0.01-0.99)
+  noisyThreshold: 2.0            # above this multiple of the typical noise level = too noisy (min 1.01)
 ```
 
 ## Per-analyzer implementation notes
@@ -569,7 +582,7 @@ Deeper trade-off discussion lives in [`docs/algorithms.md`](docs/algorithms.md) 
   - **Limitations.** Keypoint descriptors need room. A cloned region smaller than roughly 40-50px across, at the source's scale, rarely has `minimumMatchedKeypoints` keypoints far enough inside it to describe without picking up the surrounding pasted-over pixels, so small clones are left to block matching (which handles them only if unrotated). Flat or very smooth regions have no corners to match. Mirrored (flipped) copies aren't detected, since BRIEF descriptors aren't mirror-invariant. Scale changes beyond about 3x either way, or heavy shear, are rejected as implausible. Like block matching, genuinely repetitive real-world texture (tiled floors, brick, window grids) can be self-similar under a consistent transform and produce false positives; raise `minimumMatchedKeypoints` if that's a problem. Cost: extraction is roughly linear in pixel count, plus a matching step quadratic in `maximumKeypoints` (each comparison is just four XOR-popcounts). That's usually far cheaper than block matching's quadratic block comparison on large images, but it's a real addition on small ones. Working memory is around 24 bytes per pixel at full resolution while extracting.
   - **Tiling.** On a tiled (large) image, both passes pool their evidence image-wide before matching rather than resetting per tile: block candidates and keypoints are each collected tile by tile into one global index, so a copy-move whose source and pasted copy fall in two different tiles is still caught. See "Tiled processing for large images" above.
 - **Double compression detection** looks for the classic double-JPEG-compression signature: it splits the decoded image into an 8x8 grid of luma blocks (JPEG's own block size), runs a forward DCT on each one, and builds a histogram of one chosen low-frequency AC coefficient (`(1,1)` by default) across every block. A JPEG compressed once quantizes that coefficient to multiples of a single step, which just thins the histogram out evenly. Compressing a *second* time at a different quality requantizes values that are already multiples of the first step to multiples of a second, generally different one -- and because the two steps don't line up, some of the final histogram's non-empty bins end up noticeably fatter or thinner than their neighbors, in a pattern that repeats with a period tied to the ratio between the two steps. This analyzer removes the histogram's broad, natural envelope (a small local moving average) and runs a discrete Fourier transform over what's left, purely to see whether one frequency's energy dominates -- a strong single peak means a periodic comb is present; a flat spectrum means the histogram never had one. Since a crop between the two compressions shifts JPEG's 8x8 block grid relative to the file's own pixel `(0, 0)`, it repeats this scan at several candidate pixel offsets and keeps whichever one shows the strongest periodicity. Being a JPEG-quantization-specific signal, it reports "not applicable" on any non-JPEG input rather than a false negative. See `DoubleCompressionAnalyzer` and `DCTPeriodicityAnalysis`'s doc comments for the full reasoning.
-- **PRNU sensor-noise analysis**, **CFA demosaicing consistency**, **JPEG ghost detection**, **EXIF thumbnail consistency**, and **AI-generated image detection** have their own sections below.
+- **PRNU sensor-noise analysis**, **CFA demosaicing consistency**, **JPEG ghost detection**, **EXIF thumbnail consistency**, **AI-generated image detection**, and the **noise-level consistency check** have their own sections below.
 
 ## PRNU Analysis
 
