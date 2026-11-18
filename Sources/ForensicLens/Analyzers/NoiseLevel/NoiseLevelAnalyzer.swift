@@ -23,7 +23,10 @@ import ImageDecoding
 /// region with plenty of noise, just at the wrong level), and it costs a
 /// small fraction as much: one nine-tap filter pass and a median per
 /// block, linear in pixel count, with memory of one block-sized plane at a
-/// time. It never downsamples. That makes it suitable to run first, or to
+/// time. It never downsamples. In a release build it measured 7-11x faster
+/// than PRNU and 6-8x faster than CFA analysis on the same 512px to 2048px
+/// images (see README.md, "Performance of the noise-level check"). That
+/// makes it suitable to run first, or to
 /// leave on when the heavier detectors (PRNU, CFA, clone detection, JPEG
 /// ghosts) are disabled for speed. It's a pre-check and a supporting
 /// signal, not a replacement for PRNU.
