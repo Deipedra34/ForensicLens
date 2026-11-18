@@ -101,15 +101,27 @@ enum NoiseLevelEstimation {
               block.x + block.width <= buffer.width, block.y + block.height <= buffer.height
         else { return nil }
 
-        let blockLuma = lumaPlane(buffer, region: block)
-        guard clippedFraction(blockLuma.values) <= maximumClippedFraction else { return nil }
-        let meanLuma = blockLuma.values.reduce(0, +) / Double(blockLuma.values.count)
-
+        // The block plus its one-pixel border, read once: the border feeds
+        // the residual, the interior gives brightness and clipping.
         let x0 = max(0, block.x - 1)
         let y0 = max(0, block.y - 1)
         let x1 = min(buffer.width, block.x + block.width + 1)
         let y1 = min(buffer.height, block.y + block.height + 1)
         let bordered = lumaPlane(buffer, region: Region(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
+
+        var sum = 0.0
+        var clipped = 0
+        for row in (block.y - y0)..<(block.y - y0 + block.height) {
+            let start = row * bordered.width + (block.x - x0)
+            for value in bordered.values[start..<(start + block.width)] {
+                sum += value
+                if value <= 2.5 || value >= 252.5 { clipped += 1 }
+            }
+        }
+        let pixelCount = block.width * block.height
+        guard Double(clipped) / Double(pixelCount) <= maximumClippedFraction else { return nil }
+        let meanLuma = sum / Double(pixelCount)
+
         guard let sigma = NoiseVariance.robustSigma(of: NoiseResidual.highPass(bordered).values) else { return nil }
         return Measurement(sigma: sigma, meanLuma: meanLuma)
     }
@@ -133,13 +145,5 @@ enum NoiseLevelEstimation {
             }
         }
         return PRNUPlane(width: region.width, height: region.height, values: values)
-    }
-
-    /// Fraction of `values` at or within 2 gray levels of 0 or 255. An empty
-    /// list counts as fully clipped.
-    static func clippedFraction(_ values: [Double]) -> Double {
-        guard !values.isEmpty else { return 1 }
-        let clipped = values.filter { $0 <= 2.5 || $0 >= 252.5 }.count
-        return Double(clipped) / Double(values.count)
     }
 }
