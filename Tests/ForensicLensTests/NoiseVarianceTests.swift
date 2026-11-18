@@ -102,4 +102,31 @@ final class NoiseVarianceTests: XCTestCase {
             XCTAssertEqual(robust, sigma, accuracy: sigma * 0.05, "robust estimate for sigma \(sigma)")
         }
     }
+
+    // MARK: - Selection median
+
+    func testSelectionMedianMatchesASortedMedian() throws {
+        var generator = Fixtures.SeededGenerator(seed: 77)
+        for count in [1, 2, 3, 4, 5, 10, 63, 64, 4096, 4097] {
+            for distinct in [3, 1000] { // few distinct values (8-bit residuals) and many
+                let values = (0..<count).map { _ in Double(generator.next() % UInt64(distinct)) }
+                var scratch = values
+                let expected = try XCTUnwrap(PRNUCorrelation.median(values))
+                XCTAssertEqual(try XCTUnwrap(NoiseVariance.median(selectingIn: &scratch)), expected, "count \(count), distinct \(distinct)")
+                XCTAssertEqual(scratch.sorted(), values.sorted(), "only reordered")
+            }
+        }
+    }
+
+    func testSelectionMedianOfConstantAndSortedRuns() {
+        var zeros = [Double](repeating: 0, count: 4096)
+        XCTAssertEqual(NoiseVariance.median(selectingIn: &zeros), 0)
+        var ascending = (0..<1001).map(Double.init)
+        XCTAssertEqual(NoiseVariance.median(selectingIn: &ascending), 500)
+        var descending = (0..<1000).reversed().map(Double.init)
+        XCTAssertEqual(NoiseVariance.median(selectingIn: &descending), 499.5)
+        var empty: [Double] = []
+        XCTAssertNil(NoiseVariance.median(selectingIn: &empty))
+    }
 }
+
