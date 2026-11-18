@@ -901,7 +901,7 @@ PNG, TIFF, AVIF, and other formats aren't supported: they fail with an "unrecogn
 
 ### Format-agnostic and JPEG-specific detectors
 
-- **Format-agnostic: copy-move (clone) detection, PRNU sensor noise, CFA demosaicing (RGB only), EXIF metadata, and EXIF thumbnail consistency.** These run on the decoded pixels or on the EXIF block, whatever the container. EXIF from HEIF and WebP goes through the same reader as JPEG's `APP1` segment (`ContainerMetadata` only finds the block), so every metadata check and the thumbnail check work the same way on all three.
+- **Format-agnostic: copy-move (clone) detection, PRNU sensor noise, CFA demosaicing (RGB only), noise-level consistency, EXIF metadata, and EXIF thumbnail consistency.** These run on the decoded pixels or on the EXIF block, whatever the container. EXIF from HEIF and WebP goes through the same reader as JPEG's `APP1` segment (`ContainerMetadata` only finds the block), so every metadata check and the thumbnail check work the same way on all three.
 - **JPEG-specific: Error Level Analysis, JPEG ghost detection, and double JPEG compression detection.** All three model JPEG's 8x8 DCT quantization. HEIC uses HEVC and lossy WebP uses VP8, with different block sizes and transforms and in-loop deblocking, and lossless WebP isn't lossy at all. On those formats they would measure codec artifacts rather than edits, so they report **"not applicable"** with a score of 0 and the reason in the summary. BMP and PPM/PGM still get them, because such a file is often a decoded JPEG and keeps its compression history.
 
 A few format-specific notes:
