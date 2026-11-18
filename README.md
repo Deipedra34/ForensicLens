@@ -787,6 +787,53 @@ The PRNU-absence check uses `prnu.blockSize` and `prnu.maximumWorkingDimension`,
 
 **Cost.** One forward 2D FFT of at most 512x512, plus one PRNU residual extraction at PRNU's working resolution, which is about the cost of PRNU's local check. It runs as a single block, outside the tiling layer, because both signals are image-wide.
 
+## Noise-Level Consistency Check
+
+A photo taken in one exposure on one sensor has roughly the same amount of noise across most of its area: the same sensor, the same ISO, the same processing. A region spliced in from another photo usually doesn't, and neither does one that was smoothed with a denoiser or a blur brush, painted, or rendered. `NoiseLevelAnalyzer` (`noiselevel`) measures how much noise each block of the image has, compares it with the image's own typical level, and flags blocks that are clearly off in either direction.
+
+```sh
+forensiclens-cli noiselevel photo.bmp
+forensiclens-cli noiselevel photo.bmp --json
+forensiclens-cli report photo.bmp --html-report photo-report.html   # noise-level blocks drawn in green-teal
+forensiclens-cli noiselevel photo.bmp --config fast.yaml            # e.g. as a pre-check with the heavy detectors off
+```
+
+**How it measures noise.** Each block's luma (plus a one-pixel border) goes through Immerkaer's 3x3 second-difference mask (`1 -2 1 / -2 4 -2 / 1 -2 1`). The mask cancels flat areas and linear gradients, so in smooth parts of a photo what it leaves behind is mostly noise. The block's noise level is the median absolute response, scaled to a standard deviation in gray levels (`1.4826 * median|r| / 6`). A median rather than a mean square means up to half a block can be edges or texture without moving the estimate much. Blocks more than half clipped to black or white are skipped, since a saturated sensor site records no noise.
+
+**How blocks are compared.** The image's typical noise level is the median over all measured blocks, so a splice covering less than half the image can't drag the baseline toward itself. Each block's ratio to it is checked against two thresholds:
+
+- below `smoothThreshold` (default 0.5): **too smooth**. Less noise than the rest of the image: a denoised, blurred, painted, synthetic, or rendered region, or one pasted from a cleaner, lower-ISO source.
+- above `noisyThreshold` (default 2.0): **too noisy**. More noise than the rest: a region pasted from a noisier source (higher ISO, a smaller sensor, heavier compression), or noise added to hide an edit.
+
+The two directions are reported separately, in the summary and as separate indicators, because they point at different edits. When the image's blocks naturally vary a lot, the thresholds widen automatically: a block must also lie three robust standard deviations from the typical level (the median absolute deviation of every block's log ratio), so a scene whose noise varies everywhere isn't flagged everywhere. Flagged blocks are reported as regions in the same shape as clone detection, PRNU, CFA, and JPEG ghost detection, drawn in green-teal in the HTML report, and the finding feeds `SuspicionScorer` like every other analyzer's. The score is up to 55 points for the share of blocks flagged (saturating at 5%) plus up to 25 for how far past the thresholds they fall, so at most 80: lower than the other region detectors can reach, because this check is the more prone to false positives.
+
+**How it differs from PRNU, and why both.** PRNU analysis is after a specific sensor's fixed noise *pattern*. Recovering it takes a wavelet denoiser, and its local check compares each block's noise level *and* correlation structure with the rest of the image; given reference images, it can also tell whether a photo came from a particular camera. This check only measures how *much* noise each block has:
+
+| | PRNU sensor-noise analysis | Noise-level consistency |
+|---|---|---|
+| Measures | Noise level and correlation structure per block; optionally a camera's fixed pattern | Noise level per block, and which way it deviates |
+| Residual | 4-level db4 wavelet transform, a four-window Wiener filter in every subband, inverse transform | One 3x3 high-pass filter (nine multiply-adds per pixel) |
+| Resolution | Downsampled to `maximumWorkingDimension` (2048px) on larger images | Always full resolution |
+| Weak on | Heavily compressed, resized, or social-media copies; dark, saturated, or heavily textured areas | Splices from a source with a similar noise level; scenes whose noise varies naturally (high dynamic range, fine texture) |
+| Cost | One of the more expensive analyzers | The cheapest pixel analyzer (see [Performance](#performance-of-the-noise-level-check)) |
+| False positives | Fewer | More (exposure, texture, defocus; see [Limitations](#limitations-of-the-noise-level-check)) |
+
+So it's a **fast pre-check and a supporting signal, not a replacement for PRNU**. It's cheap enough to leave on, or to run first, when the heavier detectors (PRNU, CFA, clone detection, JPEG ghosts) are turned off for speed. It never downsamples, so on a large photo it can still localize a small smoothed or re-noised region that PRNU's reduced-resolution pass averages away, and it says which way the region deviates, which PRNU doesn't. When it flags a block, PRNU (and CFA, for RGB camera output) is the better judge of whether that block really came from somewhere else; agreement between them counts for more than either alone, which is how `SuspicionScorer` treats corroborating findings anyway.
+
+**Why not reuse PRNU's residual.** `PRNUResidualExtractor` is built to isolate a faint, fixed pattern a fraction of a gray level strong, which needs its full denoising pipeline on a padded, whole-image plane. Measuring how much noise a block has needs none of that precision, and reusing it would make this check exactly as expensive as the one it's meant to be a cheap complement to. The Immerkaer mask is a standard fast noise estimator for this job, a few lines long, and works on one block at a time.
+
+### Configuration
+
+```yaml
+noiseLevel:
+  enabled: true
+  blockSize: 64          # px per compared block (min 16)
+  smoothThreshold: 0.5   # below this fraction of the typical noise level: too smooth (0.01-0.99)
+  noisyThreshold: 2.0    # above this multiple of the typical noise level: too noisy (min 1.01)
+```
+
+Raising `smoothThreshold` or lowering `noisyThreshold` flags milder deviations; the two are independent, so you can, say, keep the "too noisy" side strict on images with lots of fine texture. Smaller blocks localize more precisely but give noisier estimates (each block's level comes from fewer pixels).
+
 ## Supported Formats
 
 ForensicLens identifies a file's format from its contents (magic numbers and container headers), never from its name. Extensions only decide which files `batch` and `forensiclens-eval` pick up from a directory.
