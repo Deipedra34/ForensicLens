@@ -20,17 +20,63 @@
 ///    detector closes part of the remaining gap to 100, so several weak
 ///    signals stay well short of what one strong signal reaches, and the
 ///    total can never exceed 100.
+/// 5. **Agreement.** Where flagged regions from detectors in at least two
+///    different evidence families overlap (`RegionClustering`), the area
+///    gets a boost `b = min(0.6, 0.5 * (k - 1) * m)`, for `k` agreeing
+///    families and `m` the mean evidence of the agreeing detectors. Two
+///    detectors in the same family (PRNU and the noise-level check, say)
+///    read the same trace, so their agreement isn't independent and earns
+///    nothing. Only the strongest area's boost is applied, as one more
+///    term of step 4: `1 - (1 - c)(1 - b)`.
 ///
 /// The result is scaled to 0-100 and rounded to one decimal.
 public struct ConfidenceCalibrator: Sendable {
+    /// Boost per agreeing family beyond the first, as a share of the
+    /// agreeing detectors' mean evidence.
+    public static let agreementFactor = 0.5
+
+    /// The most one area's agreement can add, before combining.
+    public static let maximumAgreementBoost = 0.6
+
     public init() {}
 
     /// The calibrated confidence for `findings`.
     public func calibrate(_ findings: [AnalyzerFinding]) -> CalibratedConfidence {
         let contributions = findings.map(Self.contribution(for:))
-        let combined = Self.combine(contributions.map(\.evidence))
+        let agreements = Self.agreements(in: findings, contributions: contributions)
+        let boost = agreements.first(where: \.applied)?.boost ?? 0
+        let combined = Self.combine(contributions.map(\.evidence) + [boost])
         let score = Self.rounded(combined * 100)
-        return CalibratedConfidence(score: score, verdict: SuspicionScorer.verdict(for: score), contributions: contributions)
+        return CalibratedConfidence(score: score, verdict: SuspicionScorer.verdict(for: score), contributions: contributions, agreements: agreements)
+    }
+
+    /// Step 5: every area at least two evidence families flagged, with its
+    /// boost, strongest first; the first is marked applied.
+    static func agreements(in findings: [AnalyzerFinding], contributions: [DetectorContribution]) -> [RegionAgreement] {
+        var evidence: [String: Double] = [:]
+        for contribution in contributions {
+            evidence[contribution.analyzerID] = max(evidence[contribution.analyzerID] ?? 0, contribution.evidence)
+        }
+
+        let candidates = RegionClustering.clusters(of: RegionClustering.claims(from: findings))
+            .filter { $0.families.count >= 2 }
+            .map { cluster -> (cluster: RegionCluster, boost: Double) in
+                let ids = cluster.analyzerIDs
+                let meanEvidence = ids.reduce(0.0) { $0 + (evidence[$1] ?? 0) } / Double(max(1, ids.count))
+                let boost = min(maximumAgreementBoost, agreementFactor * Double(cluster.families.count - 1) * meanEvidence)
+                return (cluster, boost)
+            }
+            .sorted { $0.boost > $1.boost }
+
+        return candidates.enumerated().map { index, candidate in
+            RegionAgreement(
+                region: candidate.cluster.boundingRegion,
+                analyzerIDs: candidate.cluster.analyzerIDs,
+                families: candidate.cluster.families.sorted { $0.rawValue < $1.rawValue },
+                boost: candidate.boost,
+                applied: index == 0 && candidate.boost > 0
+            )
+        }
     }
 
     /// Steps 1-3 for one finding.
