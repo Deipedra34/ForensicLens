@@ -73,7 +73,10 @@ public struct SuspicionScorer: Sendable {
         return ForensicReport(overallScore: overall, verdict: Self.verdict(for: overall), findings: findings)
     }
 
-    private static func verdict(for score: Double) -> String {
+    /// The verdict band for a 0...100 score. Shared with
+    /// `ConfidenceCalibrator`, so the calibrated confidence reads on the same
+    /// bands as the suspicion score.
+    static func verdict(for score: Double) -> String {
         switch score {
         case ..<20: return "likely authentic"
         case ..<45: return "minor anomalies"

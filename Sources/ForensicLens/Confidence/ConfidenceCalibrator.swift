@@ -1,0 +1,60 @@
+/// Turns a set of detector findings into one calibrated confidence score.
+///
+/// `SuspicionScorer` takes the strongest raw score and adds a little for
+/// each other one, which treats every detector's 0-100 as equally
+/// trustworthy and on the same scale. This is the layer on top of it that
+/// doesn't. The rule:
+///
+/// 1. **Status.** Each finding is classified (`DetectorStatus`). Only
+///    flagged findings add evidence; not-applicable, not-assessed, and
+///    failed detectors are left out entirely rather than counted as clean.
+/// 2. **Normalize.** A flagged detector's raw score is divided by the
+///    highest score it can produce (`ScoreNormalizer`), giving a 0...1
+///    strength on a scale every detector shares.
+/// 3. **Weight.** The strength is multiplied by the detector's reliability
+///    (`DetectorProfile.reliability`), lower for detectors documented as
+///    prone to false positives: the noise-level check counts 0.4, clone
+///    detection 0.95. The result is that detector's evidence `e`.
+/// 4. **Combine.** Evidence combines as independent chances of being
+///    right, `1 - (1 - e1)(1 - e2)...`, rather than adding up: each
+///    detector closes part of the remaining gap to 100, so several weak
+///    signals stay well short of what one strong signal reaches, and the
+///    total can never exceed 100.
+///
+/// The result is scaled to 0-100 and rounded to one decimal.
+public struct ConfidenceCalibrator: Sendable {
+    public init() {}
+
+    /// The calibrated confidence for `findings`.
+    public func calibrate(_ findings: [AnalyzerFinding]) -> CalibratedConfidence {
+        let contributions = findings.map(Self.contribution(for:))
+        let combined = Self.combine(contributions.map(\.evidence))
+        let score = Self.rounded(combined * 100)
+        return CalibratedConfidence(score: score, verdict: SuspicionScorer.verdict(for: score), contributions: contributions)
+    }
+
+    /// Steps 1-3 for one finding.
+    static func contribution(for finding: AnalyzerFinding) -> DetectorContribution {
+        let profile = DetectorProfile.profile(for: finding.analyzerID)
+        let status = DetectorStatus.classify(finding)
+        let strength = status == .flagged ? ScoreNormalizer.normalizedStrength(rawScore: finding.score, profile: profile) : 0
+        return DetectorContribution(
+            analyzerID: finding.analyzerID,
+            status: status,
+            rawScore: finding.score,
+            normalizedStrength: strength,
+            reliability: profile.reliability,
+            evidence: profile.weightedEvidence(normalizedStrength: strength)
+        )
+    }
+
+    /// Step 4: `1 - product(1 - e)` over `evidence`, each clamped to 0...1.
+    static func combine(_ evidence: [Double]) -> Double {
+        1 - evidence.reduce(1.0) { remaining, e in remaining * (1 - min(1, max(0, e))) }
+    }
+
+    /// `value` rounded to one decimal place.
+    static func rounded(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+}
