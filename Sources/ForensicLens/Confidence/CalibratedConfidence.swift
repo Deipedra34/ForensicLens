@@ -69,8 +69,16 @@ public struct CalibratedConfidence: Sendable, Equatable, Codable {
     public let score: Double
 
     /// A short verdict for `score`, on the same bands as the suspicion
-    /// score's.
+    /// score's, or `CalibratedConfidence.inconclusiveVerdict` when no
+    /// detector could judge the image at all.
     public let verdict: String
+
+    /// How many detectors could judge the image (flagged or clean).
+    public let assessedDetectors: Int
+
+    /// How many detectors ran, including those that were not applicable,
+    /// not assessed, or failed.
+    public let totalDetectors: Int
 
     /// Every detector's contribution, in the order the findings came in.
     public let contributions: [DetectorContribution]
@@ -84,5 +92,17 @@ public struct CalibratedConfidence: Sendable, Equatable, Codable {
         self.verdict = verdict
         self.contributions = contributions
         self.agreements = agreements
+        self.assessedDetectors = contributions.filter { $0.status.isAssessed }.count
+        self.totalDetectors = contributions.count
+    }
+
+    /// The verdict when every detector was not applicable, not assessed, or
+    /// failed: a score of 0 then means "no evidence either way", not
+    /// "likely authentic".
+    public static let inconclusiveVerdict = "inconclusive"
+
+    /// Whether no detector could judge the image.
+    public var isInconclusive: Bool {
+        assessedDetectors == 0
     }
 }

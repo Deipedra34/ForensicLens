@@ -29,7 +29,10 @@
 ///    nothing. Only the strongest area's boost is applied, as one more
 ///    term of step 4: `1 - (1 - c)(1 - b)`.
 ///
-/// The result is scaled to 0-100 and rounded to one decimal.
+/// The result is scaled to 0-100 and rounded to one decimal. Its verdict
+/// uses the suspicion score's bands, except that when no detector could
+/// judge the image at all (every one not applicable, not assessed, or
+/// failed) it's "inconclusive" rather than "likely authentic".
 public struct ConfidenceCalibrator: Sendable {
     /// Boost per agreeing family beyond the first, as a share of the
     /// agreeing detectors' mean evidence.
@@ -47,7 +50,9 @@ public struct ConfidenceCalibrator: Sendable {
         let boost = agreements.first(where: \.applied)?.boost ?? 0
         let combined = Self.combine(contributions.map(\.evidence) + [boost])
         let score = Self.rounded(combined * 100)
-        return CalibratedConfidence(score: score, verdict: SuspicionScorer.verdict(for: score), contributions: contributions, agreements: agreements)
+        let anyAssessed = contributions.contains { $0.status.isAssessed }
+        let verdict = anyAssessed ? SuspicionScorer.verdict(for: score) : CalibratedConfidence.inconclusiveVerdict
+        return CalibratedConfidence(score: score, verdict: verdict, contributions: contributions, agreements: agreements)
     }
 
     /// Step 5: every area at least two evidence families flagged, with its
