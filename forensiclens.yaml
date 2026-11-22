@@ -322,3 +322,19 @@ noiseLevel:
   # is flagged as too noisy. Lower is more sensitive (at least 1.01). Both
   # thresholds widen automatically in images whose blocks naturally vary a lot.
   noisyThreshold: 2.0
+
+report:
+  # Whether reports include a plain-language narrative: what was found, where,
+  # by which checks, and how much weight it deserves, written for someone who
+  # isn't a forensics expert. It sits on top of the calibrated confidence
+  # score, which combines the detectors with less weight on the ones prone to
+  # false positives and extra weight where independent checks flag the same
+  # area. Set to false to keep only the numbers (the calibrated confidence and
+  # its per-detector breakdown), e.g. for integrations; nothing about the
+  # detectors or the suspicion score changes either way.
+  narrative: true
+
+  # brief: headline, summary, key findings, and caveats. full: adds a
+  # walkthrough of every check, including the ones that found nothing or
+  # didn't apply to this image. The CLI's --narrative flag overrides both.
+  narrativeVerbosity: brief

@@ -125,6 +125,8 @@ public enum ConfigLoader {
             try applyAIGenerated(key: key, value: value, to: &config.aiGenerated)
         case "noiseLevel":
             try applyNoiseLevel(key: key, value: value, to: &config.noiseLevel)
+        case "report":
+            try applyReport(key: key, value: value, to: &config.report)
         default:
             throw ConfigError.unknownKey(section: section, key: key)
         }
@@ -299,6 +301,20 @@ public enum ConfigLoader {
             noiseLevel.noisyThreshold = try parseDouble(key: key, value: value)
         default:
             throw ConfigError.unknownKey(section: "noiseLevel", key: key)
+        }
+    }
+
+    private static func applyReport(key: String, value: String, to report: inout ForensicLensConfig.ReportConfig) throws {
+        switch key {
+        case "narrative":
+            report.narrative = try parseBool(key: key, value: value)
+        case "narrativeVerbosity":
+            guard let verbosity = NarrativeVerbosity(rawValue: value.lowercased()) else {
+                throw ConfigError.invalidValue(key: key, value: value)
+            }
+            report.narrativeVerbosity = verbosity
+        default:
+            throw ConfigError.unknownKey(section: "report", key: key)
         }
     }
 

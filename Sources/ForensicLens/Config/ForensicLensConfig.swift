@@ -418,6 +418,30 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         public static let `default` = AIGeneratedConfig(enabled: true, spectralSensitivity: 0.5, prnuAbsenceThreshold: 0.5, singleSignalWeight: 0)
     }
 
+    /// Settings for how reports explain their results: the plain-language
+    /// narrative built on top of the calibrated confidence score (see
+    /// `ConfidenceCalibrator` and `NarrativeGenerator`). Neither changes any
+    /// detector's findings or the suspicion score.
+    public struct ReportConfig: Codable, Equatable, Sendable {
+        /// Whether reports include the plain-language narrative. When off,
+        /// they still carry the calibrated confidence and its per-detector
+        /// breakdown, for integrations that only want the numbers.
+        public var narrative: Bool
+
+        /// How much the narrative says: `brief` (headline, summary, key
+        /// findings, caveats) or `full` (adds a walkthrough of every
+        /// detector).
+        public var narrativeVerbosity: NarrativeVerbosity
+
+        public init(narrative: Bool, narrativeVerbosity: NarrativeVerbosity) {
+            self.narrative = narrative
+            self.narrativeVerbosity = narrativeVerbosity
+        }
+
+        /// Standalone defaults, for the same reason as `TilingConfig.default`.
+        public static let `default` = ReportConfig(narrative: true, narrativeVerbosity: .brief)
+    }
+
     /// Settings for the tiling layer (see `Sources/ForensicLens/Tiling`)
     /// that splits a large image into overlapping tiles before handing it
     /// to the analyzers above, rather than processing the whole decoded
@@ -491,8 +515,9 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
     public var thumbnail: ThumbnailConfig
     public var aiGenerated: AIGeneratedConfig
     public var noiseLevel: NoiseLevelConfig
+    public var report: ReportConfig
 
-    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default, thumbnail: ThumbnailConfig = ThumbnailConfig.default, aiGenerated: AIGeneratedConfig = AIGeneratedConfig.default, noiseLevel: NoiseLevelConfig = NoiseLevelConfig.default) {
+    public init(ela: ELAConfig, metadata: MetadataConfig, cloneDetection: CloneDetectionConfig, doubleCompression: DoubleCompressionConfig, tiling: TilingConfig = TilingConfig.default, prnu: PRNUConfig = PRNUConfig.default, cfa: CFAConfig = CFAConfig.default, jpegGhost: JPEGGhostConfig = JPEGGhostConfig.default, thumbnail: ThumbnailConfig = ThumbnailConfig.default, aiGenerated: AIGeneratedConfig = AIGeneratedConfig.default, noiseLevel: NoiseLevelConfig = NoiseLevelConfig.default, report: ReportConfig = ReportConfig.default) {
         self.ela = ela
         self.metadata = metadata
         self.cloneDetection = cloneDetection
@@ -504,6 +529,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         self.thumbnail = thumbnail
         self.aiGenerated = aiGenerated
         self.noiseLevel = noiseLevel
+        self.report = report
     }
 
     /// Reasonable defaults, used when no `forensiclens.yaml` is found and
@@ -550,6 +576,7 @@ public struct ForensicLensConfig: Codable, Equatable, Sendable {
         jpegGhost: JPEGGhostConfig.default,
         thumbnail: ThumbnailConfig.default,
         aiGenerated: AIGeneratedConfig.default,
-        noiseLevel: NoiseLevelConfig.default
+        noiseLevel: NoiseLevelConfig.default,
+        report: ReportConfig.default
     )
 }
