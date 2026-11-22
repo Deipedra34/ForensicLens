@@ -35,7 +35,7 @@ public struct NarrativeGenerator: Sendable {
             summary: Self.summary(for: confidence),
             keyFindings: keyFindings(findings: findings, confidence: confidence, imageSize: imageSize),
             caveats: Self.caveats(confidence: confidence),
-            walkthrough: [],
+            walkthrough: verbosity == .full ? Self.walkthrough(findings: findings, confidence: confidence, imageSize: imageSize) : [],
             technicalAppendix: []
         )
     }
@@ -216,6 +216,45 @@ public struct NarrativeGenerator: Sendable {
             parts.append("\(failed) couldn't run on this file")
         }
         return RegionDescriber.joined(parts)
+    }
+
+    // MARK: - Walkthrough
+
+    /// Every check in run order: what it looks for, and what it concluded.
+    static func walkthrough(findings: [AnalyzerFinding], confidence: CalibratedConfidence, imageSize: ImageSize?) -> [ReportExplanation.DetectorExplanation] {
+        zip(findings, confidence.contributions).map { finding, contribution in
+            let wording = DetectorWording.wording(for: finding.analyzerID)
+            let result: String
+            switch contribution.status {
+            case .flagged:
+                let strength = strengthWord(contribution.normalizedStrength)
+                let numbers = "\(formatted(contribution.rawScore))/100 on its own scale, counted as \(formatted(contribution.evidence * 100))/100 after weighting"
+                let regions = DetectorProfile.profile(for: finding.analyzerID).localizes ? Self.regions(of: finding) : []
+                let place = regions.isEmpty ? "" : " Where: \(RegionDescriber.list(regions, in: imageSize, limit: fullRegionLimit))."
+                result = "Result: a \(strength) signal (\(numbers)). \(wording.flagMeaning)\(place)"
+            case .clean:
+                result = "Result: nothing unusual found."
+            case .notApplicable:
+                result = "Result: doesn't apply to this image. \(finding.summary)"
+            case .notAssessed:
+                result = "Result: couldn't reach a reliable answer. \(finding.summary)"
+            case .failed:
+                result = "Result: couldn't run. \(failureReason(finding.summary))"
+            }
+            return ReportExplanation.DetectorExplanation(
+                analyzerID: finding.analyzerID,
+                name: wording.name,
+                status: contribution.status,
+                text: "\(capitalized(wording.name)) \(wording.looksFor). \(result)"
+            )
+        }
+    }
+
+    /// The reason after the engine's "Could not run <name>: " prefix.
+    static func failureReason(_ summary: String) -> String {
+        guard summary.hasPrefix("Could not run"), let colon = summary.firstIndex(of: ":") else { return summary }
+        let reason = summary[summary.index(after: colon)...].trimmingWhitespace()
+        return reason.isEmpty ? summary : capitalized(reason)
     }
 
     // MARK: - Helpers
