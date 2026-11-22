@@ -33,23 +33,13 @@ public struct ForensicReport: Sendable, Equatable, Codable {
         self.explanation = explanation
     }
 
-    /// Renders the report as an itemized, human-readable block of text
-    /// suitable for direct terminal output.
+    /// Renders the report as a human-readable block of text suitable for
+    /// direct terminal output (and valid Markdown): the scores, the
+    /// plain-language explanation when there is one, then every finding
+    /// and the calibration arithmetic as technical details. See
+    /// `ReportTextRenderer`.
     public var textReport: String {
-        var lines: [String] = []
-        lines.append("ForensicLens Report")
-        lines.append("====================")
-        lines.append("Overall suspicion score: \(Int(overallScore.rounded()))/100 (\(verdict))")
-        lines.append("")
-
-        for finding in findings {
-            lines.append("[\(finding.analyzerID)] score \(Int(finding.score.rounded()))/100 -- \(finding.summary)")
-            for indicator in finding.indicators {
-                lines.append("  - \(indicator.message)")
-            }
-        }
-
-        return lines.joined(separator: "\n")
+        ReportTextRenderer.render(self)
     }
 }
 
