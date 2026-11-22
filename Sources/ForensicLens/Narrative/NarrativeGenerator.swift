@@ -36,7 +36,7 @@ public struct NarrativeGenerator: Sendable {
             keyFindings: keyFindings(findings: findings, confidence: confidence, imageSize: imageSize),
             caveats: Self.caveats(confidence: confidence),
             walkthrough: verbosity == .full ? Self.walkthrough(findings: findings, confidence: confidence, imageSize: imageSize) : [],
-            technicalAppendix: []
+            technicalAppendix: Self.technicalAppendix(findings: findings, confidence: confidence)
         )
     }
 
@@ -255,6 +255,25 @@ public struct NarrativeGenerator: Sendable {
         guard summary.hasPrefix("Could not run"), let colon = summary.firstIndex(of: ":") else { return summary }
         let reason = summary[summary.index(after: colon)...].trimmingWhitespace()
         return reason.isEmpty ? summary : capitalized(reason)
+    }
+
+    // MARK: - Technical appendix
+
+    /// Every check's raw numbers, in run order, at every verbosity: its
+    /// own score and summary, and each calibration step applied to it.
+    static func technicalAppendix(findings: [AnalyzerFinding], confidence: CalibratedConfidence) -> [ReportExplanation.AppendixEntry] {
+        zip(findings, confidence.contributions).map { finding, contribution in
+            ReportExplanation.AppendixEntry(
+                analyzerID: finding.analyzerID,
+                name: DetectorWording.wording(for: finding.analyzerID).name,
+                status: contribution.status,
+                rawScore: contribution.rawScore,
+                normalizedStrength: contribution.normalizedStrength,
+                reliability: contribution.reliability,
+                evidence: contribution.evidence,
+                summary: finding.summary
+            )
+        }
     }
 
     // MARK: - Helpers
