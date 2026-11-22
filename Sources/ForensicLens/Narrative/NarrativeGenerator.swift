@@ -12,6 +12,15 @@
 public struct NarrativeGenerator: Sendable {
     public let verbosity: NarrativeVerbosity
 
+    /// At `brief` verbosity, how many flagging checks get a key finding of
+    /// their own (strongest evidence first); the rest are summed up in one
+    /// line. `full` lists every one.
+    static let briefDetectorLimit = 3
+
+    /// How many regions a key finding spells out before saying "and N more".
+    static let briefRegionLimit = 3
+    static let fullRegionLimit = 8
+
     public init(verbosity: NarrativeVerbosity = .brief) {
         self.verbosity = verbosity
     }
@@ -24,7 +33,7 @@ public struct NarrativeGenerator: Sendable {
             verbosity: verbosity,
             headline: Self.headline(for: confidence),
             summary: Self.summary(for: confidence),
-            keyFindings: [],
+            keyFindings: keyFindings(findings: findings, confidence: confidence, imageSize: imageSize),
             caveats: [],
             walkthrough: [],
             technicalAppendix: []
@@ -79,6 +88,71 @@ public struct NarrativeGenerator: Sendable {
             ? " and extra weight where independent checks point at the same area"
             : ""
         return "\(ran); \(couldExamine), and \(found). Combining their results, with less weight on checks that often flag untouched photos\(agreement), gives a calibrated confidence of \(score) that the image was manipulated."
+    }
+
+    // MARK: - Key findings
+
+    /// Areas independent checks agree on first, then each check that
+    /// flagged something, strongest evidence first.
+    func keyFindings(findings: [AnalyzerFinding], confidence: CalibratedConfidence, imageSize: ImageSize?) -> [ReportExplanation.KeyFinding] {
+        var result: [ReportExplanation.KeyFinding] = []
+
+        for agreement in confidence.agreements {
+            let names = agreement.analyzerIDs.map { DetectorWording.wording(for: $0).name }
+            let place = Self.capitalized(RegionDescriber.describe(agreement.region, in: imageSize))
+            let weight = agreement.applied
+                ? "These checks look for different kinds of traces, so their agreement on the same area is the strongest evidence in this report."
+                : "Independent checks agree here too."
+            result.append(ReportExplanation.KeyFinding(
+                text: "\(place) was flagged by \(RegionDescriber.joined(names)). \(weight)",
+                analyzerIDs: agreement.analyzerIDs,
+                regions: [agreement.region]
+            ))
+        }
+
+        let flagged = zip(findings, confidence.contributions)
+            .filter { $0.1.status == .flagged }
+            .sorted { $0.1.evidence > $1.1.evidence }
+        let listed = verbosity == .brief ? Array(flagged.prefix(Self.briefDetectorLimit)) : flagged
+        let regionLimit = verbosity == .brief ? Self.briefRegionLimit : Self.fullRegionLimit
+
+        for (finding, contribution) in listed {
+            let wording = DetectorWording.wording(for: finding.analyzerID)
+            let regions = DetectorProfile.profile(for: finding.analyzerID).localizes ? Self.regions(of: finding) : []
+            var text = "\(Self.capitalized(wording.name)) found a \(Self.strengthWord(contribution.normalizedStrength)) signal. \(wording.flagMeaning)"
+            if !regions.isEmpty {
+                text += " Where: \(RegionDescriber.list(regions, in: imageSize, limit: regionLimit))."
+            } else if let detail = finding.indicators.max(by: { $0.weight < $1.weight })?.message {
+                text += " Detail: \(detail)"
+            }
+            result.append(ReportExplanation.KeyFinding(text: text, analyzerIDs: [finding.analyzerID], regions: regions))
+        }
+
+        let unlisted = flagged.dropFirst(listed.count)
+        if !unlisted.isEmpty {
+            let names = unlisted.map { DetectorWording.wording(for: $0.0.analyzerID).name }
+            result.append(ReportExplanation.KeyFinding(
+                text: "\(Self.capitalized(RegionDescriber.joined(names))) also found weaker signals; see the technical details.",
+                analyzerIDs: unlisted.map { $0.0.analyzerID },
+                regions: []
+            ))
+        }
+        return result
+    }
+
+    /// The distinct regions on `finding`'s indicators, in order.
+    static func regions(of finding: AnalyzerFinding) -> [Region] {
+        var seen = Set<Region>()
+        return finding.indicators.flatMap(\.regions).filter { seen.insert($0).inserted }
+    }
+
+    /// "strong", "moderate", or "weak", for a normalized strength.
+    static func strengthWord(_ normalizedStrength: Double) -> String {
+        switch normalizedStrength {
+        case 0.75...: return "strong"
+        case 0.4...: return "moderate"
+        default: return "weak"
+        }
     }
 
     // MARK: - Helpers
