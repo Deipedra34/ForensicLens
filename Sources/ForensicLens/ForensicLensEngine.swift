@@ -44,6 +44,10 @@ public struct ForensicLensEngine: Sendable {
     ///     tiling decision (`--tile-size` / `--no-tiling`). Defaults to
     ///     `.none`, which leaves `config.tiling` in full control.
     ///
+    /// The report carries the suspicion score and every finding, plus the
+    /// calibrated confidence and (unless `config.report.narrative` is off)
+    /// the plain-language explanation; see `ReportExplainer`.
+    ///
     /// Whether this image ends up tiled or not, both single-image and
     /// batch callers go through this one method -- tiling is an internal
     /// detail of how a large image gets analyzed, not a separate code path
@@ -68,7 +72,10 @@ public struct ForensicLensEngine: Sendable {
             }
         }
 
-        return SuspicionScorer().score(findings)
+        // The suspicion score, then the calibrated confidence and the
+        // plain-language explanation on top of it (`config.report`).
+        let imageSize = image.pixels.map { ImageSize(width: $0.width, height: $0.height) }
+        return ReportExplainer(settings: config.report).explain(SuspicionScorer().score(findings), imageSize: imageSize)
     }
 
     /// All analyzer identifiers this engine knows about, in run order.
