@@ -34,7 +34,7 @@ public struct NarrativeGenerator: Sendable {
             headline: Self.headline(for: confidence),
             summary: Self.summary(for: confidence),
             keyFindings: keyFindings(findings: findings, confidence: confidence, imageSize: imageSize),
-            caveats: [],
+            caveats: Self.caveats(confidence: confidence),
             walkthrough: [],
             technicalAppendix: []
         )
@@ -153,6 +153,69 @@ public struct NarrativeGenerator: Sendable {
         case 0.4...: return "moderate"
         default: return "weak"
         }
+    }
+
+    // MARK: - Caveats
+
+    /// The reliability at or below which a check counts as prone to false
+    /// positives for the caveats (see `DetectorProfile.reliability`).
+    static let falsePositiveProneReliability = 0.5
+
+    /// What to keep in mind: checks that couldn't judge the image, thin
+    /// coverage, evidence resting only on false-positive-prone checks or on
+    /// a single check, a clean result not being proof, and that every
+    /// result is a signal rather than a verdict.
+    static func caveats(confidence: CalibratedConfidence) -> [String] {
+        var result: [String] = []
+        let contributions = confidence.contributions
+        let unavailable = contributions.filter { !$0.status.isAssessed }
+        let flagged = contributions.filter { $0.status == .flagged }
+
+        if !unavailable.isEmpty {
+            let names = unavailable.map { DetectorWording.wording(for: $0.analyzerID).name }
+            let subject = confidence.isInconclusive ? "No check could examine this image" : "Not every check could examine this image"
+            result.append("\(subject): \(unavailableBreakdown(unavailable)). They count neither for nor against it (\(RegionDescriber.joined(names))).")
+        }
+
+        let assessed = confidence.assessedDetectors
+        if assessed > 0, assessed * 2 < confidence.totalDetectors {
+            result.append("Only \(assessed) of \(confidence.totalDetectors) checks could examine this image, so the result rests on less evidence than usual.")
+        }
+
+        if !flagged.isEmpty, flagged.allSatisfy({ $0.reliability <= falsePositiveProneReliability }) {
+            let wordings = flagged.map { DetectorWording.wording(for: $0.analyzerID) }
+            let names = RegionDescriber.joined(wordings.map(\.name))
+            let caveats = wordings.map(\.caveat).joined(separator: " ")
+            result.append("Everything flagged comes from \(names), which \(flagged.count == 1 ? "often flags" : "often flag") untouched photos too, so it counts for less. \(caveats) Treat it as a reason to look closer, not as proof.")
+        } else if flagged.count == 1, let only = flagged.first {
+            result.append("Only one check found anything. \(DetectorWording.wording(for: only.analyzerID).caveat)")
+        }
+
+        if flagged.isEmpty, !confidence.isInconclusive {
+            result.append("No check found anything, but that isn't proof the image is untouched: a careful edit can avoid every one of these checks.")
+        }
+
+        result.append("These are statistical signals, not proof. Weigh them together with where the image came from and what it shows.")
+        return result
+    }
+
+    /// "2 don't apply to this kind of image, 1 couldn't reach a reliable
+    /// answer, and 1 couldn't run".
+    static func unavailableBreakdown(_ unavailable: [DetectorContribution]) -> String {
+        let notApplicable = unavailable.filter { $0.status == .notApplicable }.count
+        let notAssessed = unavailable.filter { $0.status == .notAssessed }.count
+        let failed = unavailable.filter { $0.status == .failed }.count
+        var parts: [String] = []
+        if notApplicable > 0 {
+            parts.append("\(notApplicable) \(plural(notApplicable, "doesn't", "don't")) apply to this kind of image")
+        }
+        if notAssessed > 0 {
+            parts.append("\(notAssessed) couldn't reach a reliable answer (for example, the image is too small, flat, or overexposed for \(plural(notAssessed, "it", "them")))")
+        }
+        if failed > 0 {
+            parts.append("\(failed) couldn't run on this file")
+        }
+        return RegionDescriber.joined(parts)
     }
 
     // MARK: - Helpers
