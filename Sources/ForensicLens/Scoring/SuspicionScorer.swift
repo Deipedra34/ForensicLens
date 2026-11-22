@@ -11,10 +11,26 @@ public struct ForensicReport: Sendable, Equatable, Codable {
     /// the analyzers ran.
     public let findings: [AnalyzerFinding]
 
-    public init(overallScore: Double, verdict: String, findings: [AnalyzerFinding]) {
+    /// The calibrated confidence built from `findings` (see
+    /// `ConfidenceCalibrator`): detectors normalized to one scale, weighted
+    /// by how prone they are to false positives, and boosted where
+    /// independent ones agree. Set on every report `ForensicLensEngine`
+    /// produces; `nil` on a report built directly by `SuspicionScorer`.
+    /// `overallScore` is unchanged by it, so thresholds built on the
+    /// suspicion score keep working.
+    public var confidence: CalibratedConfidence?
+
+    /// The plain-language explanation of the findings (see
+    /// `NarrativeGenerator`). `nil` when the narrative is turned off
+    /// (`report.narrative: false`) or the report wasn't explained.
+    public var explanation: ReportExplanation?
+
+    public init(overallScore: Double, verdict: String, findings: [AnalyzerFinding], confidence: CalibratedConfidence? = nil, explanation: ReportExplanation? = nil) {
         self.overallScore = overallScore
         self.verdict = verdict
         self.findings = findings
+        self.confidence = confidence
+        self.explanation = explanation
     }
 
     /// Renders the report as an itemized, human-readable block of text
