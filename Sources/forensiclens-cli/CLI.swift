@@ -59,7 +59,7 @@ enum CLI {
         }
 
         do {
-            let config = try applyingReferenceOption(parsed, to: applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath)))
+            let config = try applyingNarrativeOption(parsed, to: applyingReferenceOption(parsed, to: applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath))))
 
             let only: Set<String>?
             switch command {
@@ -168,7 +168,7 @@ enum CLI {
 
         let config: ForensicLensConfig
         do {
-            config = try applyingReferenceOption(parsed, to: applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath)))
+            config = try applyingNarrativeOption(parsed, to: applyingReferenceOption(parsed, to: applyingFeatureMatchingFlag(parsed, to: ConfigLoader.load(contentsOfFile: configPath))))
         } catch {
             eprint("Error: \(error)")
             return 1
@@ -310,6 +310,30 @@ enum CLI {
         guard config.prnu.enabled else { throw CLIError.referenceWithPRNUDisabled }
         var updated = config
         updated.prnu.referenceFolder = folder
+        return updated
+    }
+
+    /// Applies `--narrative brief|full|off` on top of the loaded config:
+    /// `brief` and `full` set the narrative's verbosity (and turn it on),
+    /// `off` leaves only the calibrated confidence and the technical
+    /// details. Overrides the `report` section of forensiclens.yaml for
+    /// one run. Not `private`, so `ForensicLensTests` can exercise it directly.
+    static func applyingNarrativeOption(_ parsed: ParsedArguments, to config: ForensicLensConfig) throws -> ForensicLensConfig {
+        if parsed.flags.contains("--narrative") {
+            throw CLIError.missingOptionValue("--narrative")
+        }
+        guard let raw = parsed.options["--narrative"] else { return config }
+        var updated = config
+        switch raw.lowercased() {
+        case "off", "none", "false":
+            updated.report.narrative = false
+        default:
+            guard let verbosity = NarrativeVerbosity(rawValue: raw.lowercased()) else {
+                throw CLIError.invalidNarrative(raw)
+            }
+            updated.report.narrative = true
+            updated.report.narrativeVerbosity = verbosity
+        }
         return updated
     }
 
@@ -512,6 +536,13 @@ enum CLI {
                             shots from one camera; 10+ recommended) and
                             check whether the image's sensor noise
                             matches it. Overrides prnu.referenceFolder.
+          --narrative <brief|full|off>
+                           How much plain-language explanation the report
+                            includes: brief (default: headline, summary, key
+                            findings, caveats), full (adds a walkthrough of
+                            every check), or off (only the calibrated
+                            confidence and technical details). Overrides
+                            report.narrative / report.narrativeVerbosity.
 
         OPTIONS (batch):
           --no-recursive        Only scan the top-level directory, skip subdirectories.
@@ -540,9 +571,13 @@ enum CLI {
           --no-feature-matching Same as above, applied to every file in the batch.
           --reference <folder>  Same as above; the fingerprint is built once and
                                  every file in the batch is checked against it.
+          --narrative <brief|full|off>
+                                Same as above, for each image's report (HTML
+                                 reports and JSON output carry it).
 
         EXAMPLES:
           forensiclens-cli report photo.bmp
+          forensiclens-cli report photo.bmp --narrative full
           forensiclens-cli report IMG_0001.HEIC
           forensiclens-cli ela photo.bmp --json
           forensiclens-cli report photo.bmp --html-report photo-report.html
@@ -577,6 +612,7 @@ enum CLIError: Error, CustomStringConvertible {
     case thresholdWithoutReportDirectory
     case invalidFailThreshold(String)
     case referenceWithPRNUDisabled
+    case invalidNarrative(String)
 
     var description: String {
         switch self {
@@ -598,6 +634,8 @@ enum CLIError: Error, CustomStringConvertible {
             return "--tile-size and --no-tiling cannot be combined."
         case .referenceWithPRNUDisabled:
             return "--reference needs PRNU analysis, which is disabled (prnu.enabled is false in the config)."
+        case .invalidNarrative(let value):
+            return "--narrative must be brief, full, or off, got \"\(value)\"."
         }
     }
 }
