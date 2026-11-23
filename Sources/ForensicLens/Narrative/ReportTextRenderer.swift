@@ -68,9 +68,14 @@ enum ReportTextRenderer {
             let id = contribution.analyzerID.padding(toLength: idWidth, withPad: " ", startingAt: 0)
             let status = contribution.status.rawValue.padding(toLength: 13, withPad: " ", startingAt: 0)
             let raw = String(format: "%5.1f", contribution.rawScore)
-            if contribution.status == .flagged {
+            switch contribution.status {
+            case .flagged:
                 lines.append("  \(id)  \(status)  \(raw) -> \(String(format: "%.2f", contribution.normalizedStrength)) x \(String(format: "%.2f", contribution.reliability)) = \(String(format: "%.2f", contribution.evidence))")
-            } else {
+            case .clean:
+                // Assessed, and found nothing: no evidence, but it counts
+                // toward how many checks could examine the image.
+                lines.append("  \(id)  \(status)  \(raw) -> no evidence (found nothing)")
+            case .notApplicable, .notAssessed, .failed:
                 lines.append("  \(id)  \(status)  \(raw) -> not counted")
             }
         }
