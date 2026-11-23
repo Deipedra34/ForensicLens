@@ -109,7 +109,7 @@ const inSplice = (x, y) => x >= 128 && x < 192 && y >= 64 && y < 128;
 
 const analyzers = await lens.analyzers();
 check(
-  JSON.stringify(analyzers.map((a) => a.id)) === JSON.stringify(["ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost", "thumbnail"]),
+  JSON.stringify(analyzers.map((a) => a.id)) === JSON.stringify(["ela", "metadata", "clone", "doublecompression", "prnu", "cfa", "jpegghost", "thumbnail", "aigenerated", "noiselevel"]),
   "lists every analyzer in run order",
   analyzers.map((a) => a.id).join(", ")
 );
@@ -127,6 +127,21 @@ const perAnalyzer = [];
 for (const analyzer of analyzers) perAnalyzer.push(...(await lens.analyze(copyMove, analyzer.id)).report.findings);
 const combined = (await lens.combine(perAnalyzer)).report;
 check(Math.abs(combined.overallScore - full.report.overallScore) < 1e-9, "per-analyzer runs combine to the full-run score", `${combined.overallScore.toFixed(3)} vs ${full.report.overallScore.toFixed(3)}`);
+
+// Every report explains itself: a calibrated confidence and a plain-language narrative.
+const explanation = full.report.explanation;
+const cloneFinding = explanation?.keyFindings?.find((f) => f.analyzerIDs.includes("clone"));
+check(typeof full.report.confidence?.score === "number" && full.report.confidence.score > 0, "the full run carries a calibrated confidence", `${full.report.confidence?.score} (${full.report.confidence?.verdict})`);
+check(typeof explanation?.headline === "string" && explanation.headline.length > 0 && explanation.summary.length > 0, "the full run carries a narrative", explanation?.headline);
+check(cloneFinding?.text?.includes("copied and pasted") && cloneFinding.regions.length >= 2, "the narrative explains the copy-move forgery and where it is", cloneFinding?.text);
+check(explanation?.walkthrough?.length === analyzers.length && explanation?.technicalAppendix?.length === analyzers.length, "the full narrative walks through every check", `${explanation?.walkthrough?.length} / ${explanation?.technicalAppendix?.length}`);
+check(combined.confidence?.score === full.report.confidence?.score && combined.explanation?.headline === explanation?.headline, "combining per-analyzer runs gives the same confidence and headline", `${combined.confidence?.score} vs ${full.report.confidence?.score}`);
+// A bare array has no image size, so areas are given by coordinates only;
+// with the size (as the page sends it), also by where they are in the picture.
+const unlocatedClone = combined.explanation?.keyFindings?.find((f) => f.analyzerIDs.includes("clone"));
+const located = (await lens.combine({ findings: perAnalyzer, width: full.image.width, height: full.image.height })).report;
+const locatedClone = located.explanation?.keyFindings?.find((f) => f.analyzerIDs.includes("clone"));
+check(locatedClone?.text?.includes("(x ") && unlocatedClone?.text?.includes(" at x ") && locatedClone.text === cloneFinding?.text, "with the image size, the narrative says where in the picture", locatedClone?.text);
 
 const uniform = new Uint8Array(await readFile(new URL(".github/action-test-fixtures/clean/uniform.ppm", root)));
 const clean = await lens.analyze(uniform);
@@ -150,6 +165,8 @@ await rejects(lens.analyze(copyMove, "nonexistent"), /Unknown analyzer/, "reject
 await rejects(lens.combine("not findings"), /Could not read the findings/, "rejects malformed findings");
 const jpeg = await lens.analyze(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]));
 check(jpeg.image.pixelsDecoded === false && finding(jpeg.report, "ela").summary.startsWith("Could not run"), "a JPEG gets metadata analysis only", finding(jpeg.report, "ela").summary);
+const jpegConfidence = jpeg.report.confidence;
+check(jpegConfidence && jpegConfidence.assessedDetectors < jpegConfidence.totalDetectors && jpeg.report.explanation?.caveats?.some((c) => c.includes("couldn't run")), "checks that couldn't run are explained, not counted", `${jpegConfidence?.assessedDetectors} of ${jpegConfidence?.totalDetectors}`);
 const afterErrors = await lens.analyze(uniform);
 check(afterErrors.report.overallScore === 0, "the module keeps working after errors");
 
