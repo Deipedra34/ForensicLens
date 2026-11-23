@@ -467,6 +467,125 @@ A detector with no built-in profile (a custom analyzer added through the library
 - PRNU at 60 and the noise-level check at 40 flagging the same block: both read sensor noise, so no boost: 1 - 0.52 x 0.8 = **58.4**.
 - A HEIC whose only flag is a clone finding scores exactly what that finding scores alone. ELA, JPEG ghost, and double-compression detection are not applicable to HEIC and add nothing either way.
 
+### Verbosity: brief, full, or off
+
+The narrative comes in two lengths, set with `report.narrativeVerbosity` in `forensiclens.yaml` or `--narrative` on the command line:
+
+| Setting | What the report includes |
+|---|---|
+| `brief` (default) | Headline, summary, key findings (areas independent checks agree on, then the three strongest flagging checks with where they flagged, the rest summed up in one line), caveats, and the technical details. |
+| `full` | Everything in `brief`, with every flagging check listed on its own, plus a check-by-check walkthrough: what each check looks for and what it concluded, including the ones that found nothing, didn't apply, or couldn't reach an answer. |
+| `off` | No narrative (`report.narrative: false`, or `--narrative off`). Reports still carry the calibrated confidence and its per-detector breakdown, for integrations that only want the numbers. |
+
+```sh
+forensiclens-cli report photo.bmp                      # brief narrative
+forensiclens-cli report photo.bmp --narrative full     # adds the check-by-check walkthrough
+forensiclens-cli report photo.bmp --json --narrative off
+```
+
+The narrative appears in the text report (which is also valid Markdown), in `--json` output, in HTML reports (a "What this means" card above the findings and a calibration table below them), and in the [web demo](#web-demo).
+
+### Example: brief
+
+`forensiclens-cli report web/samples/copy-move.ppm`, the web demo's bundled copy-move forgery:
+
+```
+ForensicLens Report
+====================
+Overall suspicion score: 89/100 (likely manipulated)
+Calibrated confidence: 84.6/100 (likely manipulated) -- 5 of 10 checks could examine this image
+
+What this means
+---------------
+Likely manipulated: there is strong evidence this image was edited.
+
+ForensicLens ran 10 checks; 5 of them could examine this image, and 1 found something. Combining their results, with less weight on checks that often flag untouched photos, gives a calibrated confidence of 84.6/100 (likely manipulated) that the image was manipulated.
+
+Key findings:
+  - The copy-paste check found a strong signal. Part of the picture appears to have been copied and pasted into another spot in the same picture, a common way to hide or duplicate something. Where: an area of 32x32 pixels in the upper left (x 8-40, y 8-40) and an area of 32x32 pixels in the lower right (x 88-120, y 88-120).
+
+Keep in mind:
+  - Not every check could examine this image: 4 don't apply to this kind of image and 1 couldn't reach a reliable answer (for example, the image is too small, flat, or overexposed for it). They count neither for nor against it (the file information check (EXIF), the double-save check, the camera color-pattern check (CFA), the JPEG quality-mismatch check (JPEG ghost), and the embedded-preview check).
+  - Only one check found anything. Genuinely repeating patterns, such as tiles, bricks, or a clear sky, can occasionally match too.
+  - These are statistical signals, not proof. Weigh them together with where the image came from and what it shows.
+
+Technical details
+-----------------
+[ela] score 0/100 -- No cross-quality-consistent error-level anomalies detected across quality levels 70, 80, 90 (mean 0.0).
+[metadata] score 0/100 -- PPM format does not carry EXIF metadata; nothing to analyze.
+[clone] score 89/100 -- 9 duplicated region pair(s) found, suggesting copy-move editing.
+  ... (every finding and indicator, as before)
+
+Calibration (raw score -> normalized strength x reliability = evidence):
+  ela                clean            0.0 -> no evidence (found nothing)
+  metadata           notApplicable    0.0 -> not counted
+  clone              flagged         89.0 -> 0.89 x 0.95 = 0.85
+  doublecompression  notApplicable    0.0 -> not counted
+  prnu               clean            0.0 -> no evidence (found nothing)
+  cfa                notAssessed      0.0 -> not counted
+  jpegghost          notApplicable    0.0 -> not counted
+  thumbnail          notApplicable    0.0 -> not counted
+  aigenerated        clean            0.0 -> no evidence (found nothing)
+  noiselevel         clean            0.0 -> no evidence (found nothing)
+  Combined: 1 - product(1 - evidence) = 84.6/100 (likely manipulated)
+```
+
+On an image with several planted signals (a block spliced in from another source plus a copy-move clone; the end-to-end test's fixture), independent checks agreeing on one area leads the key findings, and the calibration shows the agreement boost:
+
+```
+Overall suspicion score: 100/100 (likely manipulated)
+Calibrated confidence: 99.9/100 (likely manipulated) -- 6 of 10 checks could examine this image
+
+Key findings:
+  - An area of 64x64 pixels in the center (x 128-192, y 64-128) was flagged by the camera color-pattern check (CFA), the copy-paste check, the noise-level check, and the camera sensor-noise check (PRNU). These checks look for different kinds of traces, so their agreement on the same area is the strongest evidence in this report.
+  - The copy-paste check found a strong signal. Part of the picture appears to have been copied and pasted into another spot in the same picture, a common way to hide or duplicate something. Where: an area of 32x32 pixels in the upper left (x 16-48, y 16-48), an area of 16x16 pixels near the top (x 120-136, y 16-32), an area of 16x16 pixels in the upper left (x 56-72, y 40-56), and 8 more areas.
+  - The camera color-pattern check (CFA) found a strong signal. Some areas are missing the camera's color pattern, or carry it shifted, as if they came from somewhere else or were rendered or resampled. Where: an area of 64x64 pixels in the center (x 128-192, y 64-128).
+  - The camera sensor-noise check (PRNU) found a moderate signal. Some areas don't carry the same sensor noise as the rest of the picture, as if they came from another photo or were smoothed, resampled, or generated. Where: an area of 64x64 pixels in the center (x 128-192, y 64-128).
+  - The noise-level check also found weaker signals; see the technical details.
+
+...
+Calibration (raw score -> normalized strength x reliability = evidence):
+  ela                clean            0.0 -> no evidence (found nothing)
+  metadata           notApplicable    0.0 -> not counted
+  clone              flagged        100.0 -> 1.00 x 0.95 = 0.95
+  doublecompression  notApplicable    0.0 -> not counted
+  prnu               flagged         74.7 -> 0.75 x 0.80 = 0.60
+  cfa                flagged         99.4 -> 0.99 x 0.70 = 0.70
+  jpegghost          notApplicable    0.0 -> not counted
+  thumbnail          notApplicable    0.0 -> not counted
+  aigenerated        clean            0.0 -> no evidence (found nothing)
+  noiselevel         flagged         80.0 -> 1.00 x 0.40 = 0.40
+  Agreement: cfa + clone + noiselevel + prnu at x 128-192, y 64-128 [demosaicing, duplication, sensorNoise] boost 0.600
+  Combined: 1 - product(1 - evidence) = 99.9/100 (likely manipulated)
+```
+
+### Example: full
+
+`--narrative full` adds the walkthrough after the caveats. For the same copy-move sample:
+
+```
+Check by check:
+  - The re-save check (ELA) checks whether every part of the image reacts the same way to being saved again as a JPEG. Result: nothing unusual found.
+  - The file information check (EXIF) reads the information the camera or editing program stored inside the file, such as the camera model, dates, and software. Result: doesn't apply to this image. PPM format does not carry EXIF metadata; nothing to analyze.
+  - The copy-paste check looks for parts of the picture that were copied and pasted elsewhere in the same picture, even if rotated or resized. Result: a strong signal (89/100 on its own scale, counted as 84.6/100 after weighting). Part of the picture appears to have been copied and pasted into another spot in the same picture, a common way to hide or duplicate something. Where: an area of 32x32 pixels in the upper left (x 8-40, y 8-40) and an area of 32x32 pixels in the lower right (x 88-120, y 88-120).
+  - The double-save check checks whether the photo was saved as a JPEG more than once. Result: doesn't apply to this image. PPM format was never JPEG-compressed, so it has no DCT quantization history to analyze; not applicable.
+  - The camera sensor-noise check (PRNU) compares the faint, camera-specific noise pattern that a sensor leaves across every part of a photo. Result: nothing unusual found.
+  - The camera color-pattern check (CFA) looks for the fine color pattern a camera's sensor leaves in every part of a photo when it builds a full-color image. Result: couldn't reach a reliable answer. No consistent CFA demosaicing pattern across the image (median green trace strength 0.01), as is typical after recompression, resizing, or a computational-photography pipeline; block consistency not assessed (low confidence).
+  - The JPEG quality-mismatch check (JPEG ghost) checks whether every part of the image was saved at the same JPEG quality. Result: doesn't apply to this image. No JPEG compression history found: this image doesn't appear to have ever been JPEG-compressed (e.g. a lossless original or a PNG/BMP export), so JPEG ghost detection is not applicable.
+  - The embedded-preview check compares the small preview picture the camera stored inside the file with the picture itself. Result: doesn't apply to this image. Only JPEG files (and HEIF or WebP files with EXIF metadata) carry an EXIF thumbnail, and this is a PPM file. EXIF thumbnail consistency is not applicable.
+  - The AI-generation traces check looks for statistical traces common in AI-generated images: regular patterns left by image upscaling, and no camera sensor noise anywhere. Result: nothing unusual found.
+  - The noise-level check compares how grainy each part of the picture is. Result: nothing unusual found.
+```
+
+### In JSON
+
+`--json` output (and the library's `ForensicReport`, which is `Codable`) gains two objects next to the existing `overallScore`, `verdict`, and `findings`. Both are omitted when absent, and JSON written before they existed still decodes:
+
+- `confidence`: `score`, `verdict`, `assessedDetectors`, `totalDetectors`, `contributions` (per detector: `analyzerID`, `status`, `rawScore`, `normalizedStrength`, `reliability`, `evidence`), and `agreements` (per agreeing area: `region`, `analyzerIDs`, `families`, `boost`, `applied`).
+- `explanation` (unless the narrative is off): `verbosity`, `headline`, `summary`, `keyFindings` (each with `text`, `analyzerIDs`, and `regions`), `caveats`, `walkthrough` (each with `analyzerID`, `name`, `status`, `text`; empty at `brief`), and `technicalAppendix` (each detector's `status`, `rawScore`, `normalizedStrength`, `reliability`, `evidence`, and its own `summary`).
+
+Library users get the same from `ForensicLensEngine.run`, or can apply it to findings of their own with `ReportExplainer`, `ConfidenceCalibrator`, and `NarrativeGenerator`, each usable on its own.
+
 **Limitations of the calibration.** The reliability weights are documented judgment calls taken from each detector's own limitations (see its section), not values fitted to a labeled benchmark. Combining evidence as independent assumes the detectors' errors are independent, which is only approximately true even across families. So treat the calibrated confidence as a well-ordered strength of evidence, not a probability you could bet on. To check how it behaves on your own images, run `forensiclens-eval` (which scores with the suspicion score) and compare against the calibrated scores in the JSON reports.
 
 ## Web Demo
