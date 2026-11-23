@@ -11,7 +11,8 @@ import ImageDecoding
 /// an analyzer itself. Everything it draws comes from `Indicator.regions`.
 ///
 /// The page is assembled from small, named pieces (`header`,
-/// `layerToggles`, `imageStage`, `legend`, `breakdown`, `toggleScript`)
+/// `layerToggles`, `imageStage`, `legend`, the "What this means" card from
+/// `HTMLExplanation`, `breakdown`, the calibration table, `toggleScript`)
 /// rather than one long string, so each part of the markup can be read
 /// and changed on its own.
 public struct HTMLReportGenerator: Sendable {
@@ -33,12 +34,14 @@ public struct HTMLReportGenerator: Sendable {
             layerToggles(layers),
             imageStage(embedded, layers: layers),
             legend(layers),
+            HTMLExplanation.card(for: report),
             breakdown(report),
-        ].joined(separator: "\n")
+            HTMLExplanation.calibrationTable(for: report),
+        ].filter { !$0.isEmpty }.joined(separator: "\n")
 
         return HTMLTemplate.document(
             title: "ForensicLens Report - \(Self.fileName(of: sourcePath))",
-            extraStyle: Self.reportStyle,
+            extraStyle: Self.reportStyle + "\n" + HTMLExplanation.style,
             body: body,
             script: layers.isEmpty ? "" : Self.toggleScript
         )
