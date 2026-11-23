@@ -173,7 +173,9 @@ Text and JSON reports say *what* was flagged; the HTML report shows *where*. `--
 - **The analyzed image**, embedded directly in the page as a base64 `data:` URI (BMP, JPEG, and WebP are embedded byte-for-byte; PPM/PGM and HEIF/HEIC, which most browsers can't display, are converted to BMP from the already-decoded pixels).
 - **Semi-transparent overlay boxes** on the image for every region an analyzer flagged, one color per analyzer: orange for Error Level Analysis, blue for copy-move (clone) detection -- both the source block and its copy -- purple for double JPEG compression, whose evidence is image-wide, so its box covers the whole area the DCT histogram was sampled from, green for PRNU sensor-noise analysis (one box per noise-inconsistent block, plus the analyzed area when an image fails a `--reference` camera check), pink for CFA demosaicing consistency (one box per block whose Bayer pattern is missing or misaligned), teal for JPEG ghost detection (one box per block compressed at a different quality than the rest of the image), indigo for EXIF thumbnail consistency, one box around the part of the image that differs most from its thumbnail, amber for AI-generated image signals, one box around the crop whose spectrum showed upsampling-lattice peaks, and green-teal for noise-level consistency (one box per block that's too smooth or too noisy).
 - **A checkbox per analyzer** above the image to show or hide that layer (a few lines of inline JavaScript, no libraries), plus a legend mapping each color to its analyzer.
+- **"What this means"**: the calibrated confidence and the plain-language explanation (headline, summary, key findings, caveats, and at full verbosity a collapsible check-by-check walkthrough). See [Confidence Scoring and Reports](#confidence-scoring-and-reports).
 - **The full findings breakdown** below the image: analyzer name, score, summary, and every indicator with its region coordinates -- the same information as the text/JSON report.
+- **A calibration table** at the end: each check's raw score, normalized strength, reliability, and evidence, and any area independent checks agreed on.
 
 An image with nothing flagged still gets a valid report that says "No anomalies detected." Overlay coordinates are in the original image's pixel space (the same `regions` now included on each `Indicator` in JSON output), so boxes stay aligned at any zoom level.
 
@@ -259,6 +261,13 @@ OPTIONS (report / ela / metadata / clone / doublecompression / prnu / cfa / jpeg
                     shots from one camera; 10+ recommended) and
                     check whether the image's sensor noise
                     matches it. Overrides prnu.referenceFolder.
+  --narrative <brief|full|off>
+                   How much plain-language explanation the report
+                    includes: brief (default: headline, summary, key
+                    findings, caveats), full (adds a walkthrough of
+                    every check), or off (only the calibrated
+                    confidence and technical details). Overrides
+                    report.narrative / report.narrativeVerbosity.
 
 OPTIONS (batch):
   --no-recursive        Only scan the top-level directory, skip subdirectories.
@@ -287,6 +296,9 @@ OPTIONS (batch):
   --no-feature-matching Same as above, applied to every file in the batch.
   --reference <folder>  Same as above; the fingerprint is built once and
                          every file in the batch is checked against it.
+  --narrative <brief|full|off>
+                        Same as above, for each image's report (HTML
+                         reports and JSON output carry it).
 ```
 
 Examples:
@@ -294,6 +306,11 @@ Examples:
 ```sh
 # Full combined report, plain text
 forensiclens-cli report photo.bmp
+
+# The same, with a check-by-check walkthrough in the plain-language explanation,
+# or with only the calibrated confidence and technical details
+forensiclens-cli report photo.bmp --narrative full
+forensiclens-cli report photo.bmp --narrative off
 
 # An iPhone photo (HEIC) or a WebP image: decoded through libheif / libwebp,
 # with no extra flags (see Supported Formats)
@@ -363,7 +380,7 @@ With `--fail-threshold <score>`, `batch` prints its report as usual, then lists 
 
 With `--html-report-dir`, each image whose overall score is above `--html-report-threshold` (default 0, so any non-zero score) gets its own HTML report in that directory, written as soon as the image finishes so the batch never holds every image in memory at once. Report names are derived from each image's path relative to the scanned directory (`nested/photo.jpg` becomes `nested_photo.jpg.html`). Once the batch completes, an `index.html` in the same directory lists every generated report sorted by suspicion score, highest first, linking to each.
 
-Sample plain-text output:
+Sample plain-text output, with `--narrative off` (by default, a "What this means" section comes first and the calibration arithmetic last; see [Confidence Scoring and Reports](#confidence-scoring-and-reports) for complete examples):
 
 ```
 ForensicLens Report
@@ -422,6 +439,9 @@ let engine = ForensicLensEngine(config: config)
 
 let report = engine.run(on: image)
 print(report.textReport)     // or: JSONEncoder().encode(report)
+
+// The calibrated confidence and plain-language explanation travel with it:
+print(report.confidence?.score ?? 0, report.explanation?.headline ?? "")
 ```
 
 ## Confidence Scoring and Reports
@@ -590,7 +610,7 @@ Library users get the same from `ForensicLensEngine.run`, or can apply it to fin
 
 ## Web Demo
 
-`web/` is a static page that runs the full analysis pipeline in the browser: ELA, EXIF/metadata, clone detection, double compression, PRNU, CFA, and JPEG ghost detection. It uses the same `ForensicLensEngine` and analyzers as the CLI, compiled to WebAssembly. Pick or drag in an image to get the overall suspicion score, each analyzer's score, summary, and indicators, and the flagged regions drawn over the image (one toggleable color per analyzer, as in the HTML report). A "Try a sample" button loads a bundled copy-move forgery.
+`web/` is a static page that runs the full analysis pipeline in the browser: every analyzer the CLI runs, from ELA and EXIF/metadata through the AI-generated image check and the noise-level check. It uses the same `ForensicLensEngine` and analyzers as the CLI, compiled to WebAssembly. Pick or drag in an image to get the overall suspicion score, a "What this means" card with the calibrated confidence and the plain-language explanation (with the check-by-check walkthrough behind a disclosure), each analyzer's score, summary, and indicators, and the flagged regions drawn over the image (one toggleable color per analyzer, as in the HTML report). A "Try a sample" button loads a bundled copy-move forgery.
 
 **Privacy: the image never leaves your browser.** The file is read locally and analyzed inside the page's own WebAssembly module, in a web worker. Nothing is uploaded. The only network requests are the page's own static files (HTML, CSS, JavaScript, `forensiclens.wasm`, and the sample if you click it). The page's Content-Security-Policy blocks requests to any other origin. The module itself has no file system or network access: its WASI host (`web/wasi-shim.js`) provides only a clock, random numbers, and console output.
 
@@ -625,7 +645,7 @@ To check a build without a browser, `node web/smoke-test.mjs` (Node.js 20 or new
 
 ### What runs, and what doesn't
 
-- All eight analyzers run with the default configuration, exactly as `forensiclens-cli report` does without a config file. It's the same code, so the same image should give the same scores and regions. The smoke test checks the outcomes the native test suite checks.
+- All ten analyzers run with the default configuration, exactly as `forensiclens-cli report` does without a config file, and the explanation is written at full verbosity. It's the same code, so the same image should give the same scores and regions. The smoke test checks the outcomes the native test suite checks.
 - Formats are the same as the CLI, except HEIF/HEIC and WebP: their decoders are libheif and libwebp, which a WebAssembly module can't load, so the page reports that it can't decode them. BMP and PPM/PGM get every pixel analyzer. JPEG gets metadata analysis and the EXIF thumbnail check; the other analyzers don't decode JPEG pixels yet (see [Supported Formats](#supported-formats)). PNG and other formats get an "Unrecognized image format" error. The page previews BMP and JPEG with the browser's own decoder and PPM/PGM with a small JavaScript decoder (`web/pnm.js`).
 - There's no config file, no PRNU `--reference` mode (it needs a folder of camera images), and no batch mode.
 
@@ -731,6 +751,10 @@ noiseLevel:
   blockSize: 64                  # px per compared block (min 16)
   smoothThreshold: 0.5           # below this fraction of the typical noise level = too smooth (0.01-0.99)
   noisyThreshold: 2.0            # above this multiple of the typical noise level = too noisy (min 1.01)
+
+report:
+  narrative: true                # false = no plain-language explanation; the calibrated confidence is always included
+  narrativeVerbosity: brief      # brief | full (full adds a check-by-check walkthrough); --narrative overrides both
 ```
 
 ## Per-analyzer implementation notes
@@ -1240,7 +1264,9 @@ The whole suite runs offline, without special privileges or real photos, against
 
 The HEIF/HEIC and WebP tests build their fixtures in-process too, with libheif and libwebp's own encoders, from the same synthetic pixels as every other test. `HEIFWebPDecodingTests.swift` checks format detection, that lossless WebP round-trips bit-exactly, that lossy WebP and HEIC keep their dimensions and colors, and that truncated or garbled files fail with a clear `ImageDecodingError` instead of crashing. `HEIFWebPMetadataTests.swift` checks EXIF extraction from hand-assembled HEIF (`Exif` item in `mdat` or `idat`) and WebP (`EXIF` chunk) containers, including malformed ones, and that `MetadataAnalyzer` scores them like JPEG. `JPEGSpecificDetectorApplicabilityTests.swift` checks that ELA, JPEG ghost, and double-compression detection report "not applicable" on HEIF and WebP, tiled or not. `HEIFWebPPipelineTests.swift` runs the full engine on HEIF and WebP files carrying a planted copy-move clone, PRNU splice, CFA splice, or edit after the EXIF thumbnail, and checks that each is found through the new decoders. `HEIFWebPBatchTests.swift` and `HEIFWebPEvaluationTests.swift` cover default extensions, `formats`, and skipping corrupt HEIF/WebP files in `batch` and `forensiclens-eval`. Tests that need libheif or libwebp skip themselves (with the install command) when the library isn't installed. CI installs both, plus libheif's HEVC encoder plugin for writing the fixtures, and sets `FORENSICLENS_REQUIRE_IMAGE_CODECS=1`, which turns a missing library into a failure instead of a skip.
 
-The WebAssembly build has its own smoke test, `node web/smoke-test.mjs`, run after `scripts/wasm/build.sh` (see [Web Demo](#web-demo)). It isn't part of `swift test` or CI, since it needs the Swift SDK for WebAssembly.
+Confidence calibration and the narrative are tested on synthetic findings with hand-worked expected scores, and end to end. `ConfidenceCalibrationTests.swift` checks normalization against each detector's ceiling, reliability weighting (the noise-level check's strongest finding calibrates to 40 where the suspicion score says 80), and the evidence combination. `RegionAgreementCalibrationTests.swift` checks the agreement boost: PRNU and CFA on the same block give 76.6 against 69.8 apart, same-family detectors and whole-image detectors earn nothing, regions must overlap by a quarter, the boost is capped, and only the strongest area counts. `NotApplicableCalibrationTests.swift` checks the status of every kind of finding, real analyzer output on HEIF/WebP and tiny images included, and that not-applicable, unassessed, and failed detectors neither add nor dilute evidence; nothing assessable is "inconclusive". `NarrativeGeneratorTests.swift` and `NotApplicableNarrativeTests.swift` check, by key terms and structure rather than exact sentences, that the narrative names the right detectors and regions, leads with agreeing areas, differs between brief and full, merges runs of blocks into areas, and explains checks that didn't apply as such. `NarrativeEndToEndTests.swift` runs the engine on a synthetic image with a spliced block and a copy-move clone and checks the report points at both. `ReportOutputTests.swift`, `HTMLExplanationTests.swift`, `NarrativeCLITests.swift`, and `ReportConfigTests.swift` cover the text, JSON, and HTML output, `--narrative`, and the `report` config section.
+
+The WebAssembly build has its own smoke test, `node web/smoke-test.mjs`, run after `scripts/wasm/build.sh` (see [Web Demo](#web-demo)). It also checks that reports carry the calibrated confidence and the narrative, and that combining per-analyzer runs gives the same ones as a full run. It isn't part of `swift test` or CI, since it needs the Swift SDK for WebAssembly.
 
 To generate the same coverage report as CI locally (Linux/macOS with the Swift toolchain's `llvm-cov`/`llvm-profdata`):
 
