@@ -162,6 +162,7 @@ Above a configurable size threshold, `ForensicLensEngine` routes an image throug
 | Cross-platform (macOS / Linux) | Yes |
 | Browser demo (WebAssembly, analysis runs client-side) | Yes, see [Web Demo](#web-demo) |
 | HEIF/HEIC and WebP input | Yes, with libheif / libwebp installed (loaded at run time; see [Supported Formats](#supported-formats)) |
+| Calibrated confidence score with a plain-language explanation (brief or full) and a technical appendix | Yes, see [Confidence Scoring and Reports](#confidence-scoring-and-reports) |
 | Third-party dependencies | None to build; libheif and libwebp are optional at run time |
 
 ### HTML visual report
@@ -422,6 +423,51 @@ let engine = ForensicLensEngine(config: config)
 let report = engine.run(on: image)
 print(report.textReport)     // or: JSONEncoder().encode(report)
 ```
+
+## Confidence Scoring and Reports
+
+Each detector reports its own 0-100 score, and those scores aren't comparable as they stand: they top out at different values, and some detectors are far more prone to false positives than others. So every report carries two combined numbers, plus a plain-language explanation of what was found:
+
+- **Suspicion score** (`overallScore`, unchanged). `SuspicionScorer` takes the strongest finding and adds 15% of each other one. Batch sorting, `--fail-threshold`, the HTML report index, and `forensiclens-eval` keep using it, so existing thresholds behave exactly as before.
+- **Calibrated confidence** (`confidence.score`). The calibration rule below combines the same findings on one scale, weights each detector by how reliable it is, and boosts areas that independent detectors agree on. It's the number the narrative explains.
+- **Explanation** (`explanation`). A headline, a short summary, the key findings with where they are in the picture, caveats, and optionally a check-by-check walkthrough, written for someone who isn't a forensics expert. A technical appendix holds the raw numbers behind it.
+
+None of this changes what any detector reports. Calibration (`Sources/ForensicLens/Confidence`) and the narrative (`Sources/ForensicLens/Narrative`) are separate layers that read finished findings, and both are deterministic, rule-based code: the narrative is assembled from fixed sentence templates and the findings' own numbers and regions, with no network access and no model involved.
+
+### The calibration rule
+
+1. **Status.** Each finding is classified from its own score and summary: *flagged* (score at least 0.5, so it shows as 1/100 or more), *clean*, *not applicable* (a JPEG-specific check on a HEIC, a color check on a grayscale image, a thumbnail check without a thumbnail), *not assessed* (too small, flat, or clipped to judge), or *failed* (the engine's "Could not run ..."). Only flagged findings add evidence. The last three are left out entirely: not counted as clean, and not counted against the image.
+2. **Normalize.** A flagged detector's raw score is divided by the highest score it can produce, so 1.0 means "this detector's strongest possible finding" for every detector. The noise-level check tops out at 80, the AI-generated image check at 75, the thumbnail check at 90, and the others at 100.
+3. **Weight.** The normalized strength is multiplied by the detector's reliability, which reflects how often its documented limitations produce false positives on untouched photos. That gives the detector's evidence `e`, from 0 to 1.
+4. **Combine.** Evidence combines as `1 - (1 - e1)(1 - e2)...` rather than adding up. Each detector closes part of the remaining gap to 100, so several weak signals stay well short of one strong one, and the result can never pass 100.
+5. **Agreement.** Every flagged region from a detector that points at a specific area is compared with the others. Regions from different detectors overlap when their intersection covers at least a quarter of the smaller one. An area flagged by detectors from `k >= 2` different evidence families gets a boost `b = min(0.6, 0.5 x (k - 1) x m)`, where `m` is the agreeing detectors' mean evidence. It enters step 4 as one more term. Detectors in the same family read the same trace, so their agreement earns nothing. Only the strongest agreeing area counts, so two detectors flagging many of the same blocks can't stack boosts.
+
+The result is scaled to 0-100 and rounded to one decimal, and read on the same verdict bands as the suspicion score: below 20 "likely authentic", below 45 "minor anomalies", below 70 "suspicious", otherwise "likely manipulated". When no detector could judge the image at all (every one not applicable, not assessed, or failed), the verdict is **"inconclusive"**, not "likely authentic".
+
+| Detector | Score ceiling | Reliability | Evidence family | Why that reliability |
+|---|---:|---:|---|---|
+| Copy-move (clone) detection | 100 | 0.95 | duplication | Exact block matches and geometrically verified keypoint matches rarely happen by chance; repeating patterns are the main innocent cause. |
+| EXIF thumbnail consistency | 90 | 0.85 | thumbnail | A thumbnail that no longer matches is strong evidence the picture changed after capture; benign re-exporters and rotations are the innocent causes. |
+| PRNU sensor noise | 100 | 0.80 | sensor noise | Dark, clipped, and strongly textured areas are its documented source of false positives. |
+| JPEG ghost detection | 100 | 0.80 | compression history | A different compression quality in one region rarely arises innocently, but it needs JPEG-derived pixels. |
+| CFA demosaicing | 100 | 0.70 | demosaicing | Recompression, resizing, and phone processing weaken the pattern unevenly; documented as a supporting signal. |
+| Double JPEG compression | 100 | 0.65 | compression history | Shows the file was saved twice, which any innocent re-save also does, and doesn't say where. |
+| Error Level Analysis | 100 | 0.60 | compression history | High-contrast edges, text, and fine texture have elevated error levels in untouched JPEGs too. |
+| EXIF / metadata | 100 | 0.60 | metadata | Editing software and re-saved timestamps are as common in innocent exports as in manipulation. |
+| AI-generated image signals | 75 | 0.50 | generation | Not a trained classifier: JPEG grids, resampling, screenshots, and graphics can trip it. |
+| Noise-level consistency | 80 | 0.40 | sensor noise | Documented as more false-positive-prone than PRNU: exposure, texture, defocus, and smooth surfaces change noise in untouched photos. |
+
+A detector with no built-in profile (a custom analyzer added through the library) counts on a 0-100 scale at reliability 0.5, in a family of its own. The profiles live in `DetectorProfile.builtIn`.
+
+**Worked examples**, all from `ConfidenceCalibrationTests` and `RegionAgreementCalibrationTests`:
+
+- The noise-level check's strongest possible finding on its own (raw 80) is a suspicion score of 80, "likely manipulated". Calibrated, it's 1.0 x 0.4 = **40, "minor anomalies"**: a reason to look closer, not a verdict. Clone detection at the same normalized strength gives 95.
+- Clone detection at 90 (evidence 0.855) plus a metadata finding at 35 (evidence 0.21): 1 - 0.145 x 0.79 = **88.5**.
+- PRNU at 60 (evidence 0.48) and CFA at 60 (evidence 0.42) flagging *different* blocks: 1 - 0.52 x 0.58 = **69.8**. Flagging the *same* block, two independent families agree, boost 0.5 x 0.45 = 0.225: 1 - 0.3016 x 0.775 = **76.6**.
+- PRNU at 60 and the noise-level check at 40 flagging the same block: both read sensor noise, so no boost: 1 - 0.52 x 0.8 = **58.4**.
+- A HEIC whose only flag is a clone finding scores exactly what that finding scores alone. ELA, JPEG ghost, and double-compression detection are not applicable to HEIC and add nothing either way.
+
+**Limitations of the calibration.** The reliability weights are documented judgment calls taken from each detector's own limitations (see its section), not values fitted to a labeled benchmark. Combining evidence as independent assumes the detectors' errors are independent, which is only approximately true even across families. So treat the calibrated confidence as a well-ordered strength of evidence, not a probability you could bet on. To check how it behaves on your own images, run `forensiclens-eval` (which scores with the suspicion score) and compare against the calibrated scores in the JSON reports.
 
 ## Web Demo
 
