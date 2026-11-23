@@ -21,12 +21,26 @@ struct RegionCluster: Equatable {
 
     /// The smallest rectangle containing every region in the area.
     var boundingRegion: Region {
-        let regions = claims.map(\.region)
-        let minX = regions.map(\.x).min() ?? 0
-        let minY = regions.map(\.y).min() ?? 0
-        let maxX = regions.map { $0.x + $0.width }.max() ?? 0
-        let maxY = regions.map { $0.y + $0.height }.max() ?? 0
-        return Region(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        RegionClustering.bounding(claims.map(\.region)) ?? Region(x: 0, y: 0, width: 0, height: 0)
+    }
+
+    /// Where the detectors actually agree: the smallest rectangle
+    /// containing every overlap between regions from two different
+    /// detectors. Narrower than `boundingRegion` when one detector's region
+    /// is much larger than the rest -- a large copy-move match that happens
+    /// to cover a small spliced block shouldn't stretch the agreeing area
+    /// to its own size. Falls back to `boundingRegion` for an area only one
+    /// detector flagged.
+    var agreementRegion: Region {
+        var overlaps: [Region] = []
+        for i in claims.indices {
+            for j in claims.indices where j > i && claims[i].analyzerID != claims[j].analyzerID {
+                guard RegionClustering.overlaps(claims[i].region, claims[j].region),
+                      let overlap = claims[i].region.intersection(claims[j].region) else { continue }
+                overlaps.append(overlap)
+            }
+        }
+        return RegionClustering.bounding(overlaps) ?? boundingRegion
     }
 }
 
@@ -50,6 +64,16 @@ enum RegionClustering {
 
     static func area(_ region: Region) -> Int {
         max(0, region.width) * max(0, region.height)
+    }
+
+    /// The smallest rectangle containing all of `regions`, or `nil` for none.
+    static func bounding(_ regions: [Region]) -> Region? {
+        guard let minX = regions.map(\.x).min(),
+              let minY = regions.map(\.y).min(),
+              let maxX = regions.map({ $0.x + $0.width }).max(),
+              let maxY = regions.map({ $0.y + $0.height }).max()
+        else { return nil }
+        return Region(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
     /// Whether `a` and `b` overlap enough to count as one area.

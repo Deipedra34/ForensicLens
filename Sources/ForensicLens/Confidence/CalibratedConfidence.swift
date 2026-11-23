@@ -33,7 +33,8 @@ public struct DetectorContribution: Sendable, Equatable, Codable {
 /// An area that detectors from more than one independent evidence family
 /// flagged, and how much their agreement raised the calibrated confidence.
 public struct RegionAgreement: Sendable, Equatable, Codable {
-    /// The smallest rectangle containing every agreeing detector's region.
+    /// Where the agreeing detectors' regions overlap: the smallest rectangle
+    /// containing every overlap between two of them.
     public let region: Region
 
     /// The detectors that flagged this area, sorted.

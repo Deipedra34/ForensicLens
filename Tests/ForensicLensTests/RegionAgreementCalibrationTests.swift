@@ -96,6 +96,20 @@ final class RegionAgreementCalibrationTests: XCTestCase {
         XCTAssertEqual(twice.score, 76.6, accuracy: 0.05)
     }
 
+    func testAgreeingAreaIsWhereTheDetectorsOverlapNotTheirCombinedExtent() throws {
+        // A large copy-move match happens to cover the spliced block that
+        // PRNU and CFA both flag.
+        let largeMatch = Region(x: 100, y: 40, width: 140, height: 160)
+        let confidence = calibrator.calibrate([
+            flagged("prnu", 60, [block]),
+            flagged("cfa", 60, [block]),
+            flagged("clone", 90, [largeMatch]),
+        ])
+        let agreement = try XCTUnwrap(confidence.agreements.first)
+        XCTAssertEqual(agreement.analyzerIDs, ["cfa", "clone", "prnu"])
+        XCTAssertEqual(agreement.region, block, "not the 140x160 extent of the clone match")
+    }
+
     func testCloneSourceAndCopyCanEachMatchADifferentDetector() {
         // Clone detection reports both the source and the pasted copy; a
         // CFA flag on the copy agrees with it.

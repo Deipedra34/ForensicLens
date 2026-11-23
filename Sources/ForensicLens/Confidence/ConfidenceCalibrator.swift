@@ -75,7 +75,7 @@ public struct ConfidenceCalibrator: Sendable {
 
         return candidates.enumerated().map { index, candidate in
             RegionAgreement(
-                region: candidate.cluster.boundingRegion,
+                region: candidate.cluster.agreementRegion,
                 analyzerIDs: candidate.cluster.analyzerIDs,
                 families: candidate.cluster.families.sorted { $0.rawValue < $1.rawValue },
                 boost: candidate.boost,
