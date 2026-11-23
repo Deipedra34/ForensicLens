@@ -34,19 +34,38 @@ enum WebAnalysisAPI {
     }
 
     /// The result of one call. Exactly one of `report` and `error` is set;
-    /// `image` accompanies a report from `analyze`.
+    /// `image` accompanies a report from `analyze`. Every report carries the
+    /// calibrated confidence and the plain-language explanation.
     struct Response: Codable {
         var report: ForensicReport?
         var image: ImageInfo?
         var error: String?
     }
 
-    static let engine = ForensicLensEngine(config: .default)
+    /// What `combine` accepts: the findings of separate `analyze` calls,
+    /// plus the image's size so the explanation can say where in the
+    /// picture a flagged area is. A bare JSON array of findings works too.
+    struct CombineRequest: Codable {
+        let findings: [AnalyzerFinding]
+        let width: Int?
+        let height: Int?
+    }
+
+    /// Default config, except that the narrative is written at full
+    /// verbosity: the page shows the brief part up front and the
+    /// check-by-check walkthrough behind a disclosure.
+    static let config: ForensicLensConfig = {
+        var config = ForensicLensConfig.default
+        config.report.narrativeVerbosity = .full
+        return config
+    }()
+
+    static let engine = ForensicLensEngine(config: config)
 
     /// Display names, read from the analyzers themselves (the same way the
     /// HTML report does) so they can't drift from the library's.
     static let displayNames: [String: String] = {
-        let analyzers: [any Analyzer] = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(), CFAAnalyzer(), JPEGGhostAnalyzer(), ThumbnailConsistencyAnalyzer()]
+        let analyzers: [any Analyzer] = [ELAAnalyzer(), MetadataAnalyzer(), CloneDetectionAnalyzer(), DoubleCompressionAnalyzer(), PRNUAnalyzer(), CFAAnalyzer(), JPEGGhostAnalyzer(), ThumbnailConsistencyAnalyzer(), AIGeneratedImageAnalyzer(), NoiseLevelAnalyzer()]
         return Dictionary(uniqueKeysWithValues: analyzers.map { ($0.identifier, $0.displayName) })
     }()
 
@@ -87,16 +106,30 @@ enum WebAnalysisAPI {
         return Response(report: report, image: info)
     }
 
-    /// Combines the findings of separate `analyze` calls (a JSON array of
-    /// `AnalyzerFinding`) into one report, exactly as a single full run
-    /// would: `SuspicionScorer` is order-independent.
-    static func combine(_ findingsJSON: [UInt8]) -> Response {
-        do {
-            let findings = try JSONDecoder().decode([AnalyzerFinding].self, from: Data(findingsJSON))
-            return Response(report: SuspicionScorer().score(findings))
-        } catch {
-            return Response(error: "Could not read the findings to combine: \(error)")
+    /// Combines the findings of separate `analyze` calls (a `CombineRequest`,
+    /// or a bare JSON array of `AnalyzerFinding`) into one report, exactly as
+    /// a single full run would: `SuspicionScorer` and the confidence
+    /// calibration are both order-independent, and the explanation is built
+    /// by the same `ReportExplainer` the engine uses.
+    static func combine(_ json: [UInt8]) -> Response {
+        let data = Data(json)
+        let decoder = JSONDecoder()
+        let findings: [AnalyzerFinding]
+        var imageSize: ImageSize?
+        if let request = try? decoder.decode(CombineRequest.self, from: data) {
+            findings = request.findings
+            if let width = request.width, let height = request.height {
+                imageSize = ImageSize(width: width, height: height)
+            }
+        } else {
+            do {
+                findings = try decoder.decode([AnalyzerFinding].self, from: data)
+            } catch {
+                return Response(error: "Could not read the findings to combine: \(error)")
+            }
         }
+        let scored = SuspicionScorer().score(findings)
+        return Response(report: ReportExplainer(settings: config.report).explain(scored, imageSize: imageSize))
     }
 
     /// `value` as UTF-8 JSON. Falls back to a fixed error object (which
