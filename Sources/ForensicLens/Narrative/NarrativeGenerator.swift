@@ -140,10 +140,12 @@ public struct NarrativeGenerator: Sendable {
         return result
     }
 
-    /// The distinct regions on `finding`'s indicators, in order.
+    /// The distinct regions on `finding`'s indicators, in order, with runs
+    /// of overlapping blocks merged into single areas (see
+    /// `RegionDescriber.merged`).
     static func regions(of finding: AnalyzerFinding) -> [Region] {
         var seen = Set<Region>()
-        return finding.indicators.flatMap(\.regions).filter { seen.insert($0).inserted }
+        return RegionDescriber.merged(finding.indicators.flatMap(\.regions).filter { seen.insert($0).inserted })
     }
 
     /// "strong", "moderate", or "weak", for a normalized strength.

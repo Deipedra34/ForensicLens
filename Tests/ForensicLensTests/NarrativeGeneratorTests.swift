@@ -162,6 +162,33 @@ final class NarrativeGeneratorTests: XCTestCase {
         XCTAssertEqual(RegionDescriber.joined(["a", "b", "c"]), "a, b, and c")
     }
 
+    func testRunsOfOverlappingBlocksAreDescribedAsOneArea() throws {
+        // Block matching reports a 32px copied patch as 16px blocks every 8px.
+        var source: [Region] = []
+        var copy: [Region] = []
+        for y in stride(from: 16, through: 32, by: 8) {
+            for x in stride(from: 16, through: 32, by: 8) {
+                source.append(Region(x: x, y: y, width: 16, height: 16))
+                copy.append(Region(x: x, y: y + 160, width: 16, height: 16))
+            }
+        }
+        XCTAssertEqual(RegionDescriber.merged(source + copy), [Region(x: 16, y: 16, width: 32, height: 32), Region(x: 16, y: 176, width: 32, height: 32)])
+
+        let (explanation, _) = explain([flagged("clone", 90, source + copy)], size: size)
+        let clone = try XCTUnwrap(explanation.keyFindings.first { $0.analyzerIDs == ["clone"] })
+        XCTAssertEqual(clone.regions.count, 2)
+        XCTAssertTrue(clone.text.contains("32x32 pixels"), clone.text)
+        XCTAssertFalse(clone.text.contains("more area"), clone.text)
+    }
+
+    func testRegionsOfVeryDifferentSizesAreNotMerged() {
+        let small = Region(x: 0, y: 0, width: 16, height: 16)
+        let large = Region(x: 8, y: 8, width: 120, height: 120)
+        XCTAssertEqual(RegionDescriber.merged([small, large]), [small, large])
+        let apart = Region(x: 64, y: 64, width: 16, height: 16)
+        XCTAssertEqual(RegionDescriber.merged([small, apart]), [small, apart])
+    }
+
     func testTheSameResultsAlwaysGiveTheSameNarrative() {
         XCTAssertEqual(explain(tamperedFindings, .full, size: size).0, explain(tamperedFindings, .full, size: size).0)
     }

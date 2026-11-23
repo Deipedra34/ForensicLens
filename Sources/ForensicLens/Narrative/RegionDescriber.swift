@@ -37,6 +37,66 @@ public enum RegionDescriber {
         return joined(parts)
     }
 
+    /// `regions` with overlapping or touching regions of a similar size
+    /// (the larger at most `mergeSizeRatio` times the area of the smaller)
+    /// merged into their bounding box, in order of first appearance.
+    ///
+    /// Block matching reports a copied patch as a run of overlapping 16px
+    /// blocks, which reads far better as one area than as a list of
+    /// cells. Regions of very different sizes are kept apart, so a small
+    /// flagged block next to a large match isn't swallowed by it. Only
+    /// what the narrative *says* is merged: overlays and the raw findings
+    /// keep every region.
+    public static func merged(_ regions: [Region]) -> [Region] {
+        var parent = Array(regions.indices)
+
+        func root(_ index: Int) -> Int {
+            var current = index
+            while parent[current] != current {
+                parent[current] = parent[parent[current]]
+                current = parent[current]
+            }
+            return current
+        }
+
+        for i in regions.indices {
+            for j in regions.indices where j > i {
+                guard touchesOrOverlaps(regions[i], regions[j]), similarInSize(regions[i], regions[j]) else { continue }
+                let a = root(i)
+                let b = root(j)
+                if a != b {
+                    parent[b] = a
+                }
+            }
+        }
+
+        var order: [Int] = []
+        var members: [Int: [Region]] = [:]
+        for index in regions.indices {
+            let key = root(index)
+            if members[key] == nil {
+                order.append(key)
+            }
+            members[key, default: []].append(regions[index])
+        }
+        return order.compactMap { members[$0].flatMap(RegionClustering.bounding) }
+    }
+
+    /// Regions more than this many times larger (by area) than a neighbor
+    /// aren't merged with it.
+    static let mergeSizeRatio = 4
+
+    static func touchesOrOverlaps(_ a: Region, _ b: Region) -> Bool {
+        a.x <= b.x + b.width && b.x <= a.x + a.width && a.y <= b.y + b.height && b.y <= a.y + a.height
+    }
+
+    static func similarInSize(_ a: Region, _ b: Region) -> Bool {
+        let areaA = RegionClustering.area(a)
+        let areaB = RegionClustering.area(b)
+        guard areaA > 0, areaB > 0 else { return false }
+        return max(areaA, areaB) <= mergeSizeRatio * min(areaA, areaB)
+    }
+
     /// "A", "A and B", "A, B, and C".
     public static func joined(_ parts: [String]) -> String {
         switch parts.count {
