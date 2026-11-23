@@ -126,3 +126,17 @@ progress { width: 100%; height: 10px; }
 @media (max-width: 600px) {
   .finding-name { flex-basis: 140px; }
 }
+
+/* "What this means": the library's plain-language explanation. */
+.explanation h2 { margin-top: 0; }
+.explanation h3 { font-size: 15px; margin: 14px 0 6px; }
+.explanation ul { margin: 0; padding-left: 20px; }
+.explanation li { margin-bottom: 6px; }
+.calibrated { font-size: 17px; margin: 0 0 8px; }
+.calibrated strong.low { color: var(--low); }
+.calibrated strong.minor { color: var(--minor); }
+.calibrated strong.medium { color: var(--medium); }
+.calibrated strong.high { color: var(--high); }
+.headline { font-weight: 600; }
+.walkthrough { margin-top: 12px; }
+.walkthrough summary { cursor: pointer; font-weight: 600; }

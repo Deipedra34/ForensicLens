@@ -15,6 +15,8 @@ const layerColors = {
   cfa: "#e64980",
   jpegghost: "#1098ad",
   thumbnail: "#5c7cfa",
+  aigenerated: "#f59f00",
+  noiselevel: "#0ca678",
 };
 const fallbackColor = "#868e96";
 
@@ -167,9 +169,54 @@ function renderResults({ report, image, analyzers, timings }, preview) {
   $("score-value").textContent = String(score);
   $("overall-score").className = `score ${severity(score)}`;
 
+  renderExplanation(report);
   renderOverlay(report, names, image, preview);
   renderFindings(report, names, timings);
   $("results").hidden = false;
+}
+
+// The plain-language explanation and calibrated confidence the library
+// attaches to every report (report.explanation, report.confidence). The
+// sentences come from the library as-is; this only lays them out.
+function renderExplanation(report) {
+  const card = $("explanation");
+  const { confidence, explanation } = report;
+  card.hidden = !confidence && !explanation;
+  if (card.hidden) return;
+
+  const calibrated = $("calibrated");
+  calibrated.replaceChildren();
+  if (confidence) {
+    const value = document.createElement("strong");
+    value.className = severity(confidence.score);
+    value.textContent = `${formatScore(confidence.score)}/100`;
+    const detail = document.createElement("span");
+    detail.className = "muted";
+    detail.textContent = ` (${confidence.verdict}) · ${confidence.assessedDetectors} of ${confidence.totalDetectors} checks could examine this image`;
+    calibrated.append("Calibrated confidence: ", value, detail);
+  }
+
+  $("explanation-headline").textContent = explanation?.headline ?? "";
+  $("explanation-summary").textContent = explanation?.summary ?? "";
+  fillList("key-findings", explanation?.keyFindings?.map((finding) => finding.text) ?? []);
+  fillList("caveats", explanation?.caveats ?? []);
+  fillList("walkthrough", explanation?.walkthrough?.map((entry) => entry.text) ?? []);
+}
+
+// Fills the list with `items` and hides its block when there are none.
+function fillList(id, items) {
+  const list = $(id);
+  list.replaceChildren(...items.map((text) => {
+    const entry = document.createElement("li");
+    entry.textContent = text;
+    return entry;
+  }));
+  $(`${id}-block`).hidden = items.length === 0;
+}
+
+function formatScore(score) {
+  const rounded = Math.round(score * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function renderOverlay(report, names, image, preview) {

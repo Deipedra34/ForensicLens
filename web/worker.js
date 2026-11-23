@@ -53,7 +53,9 @@ self.onmessage = async (event) => {
     }
 
     post({ type: "progress", step: "Combining results...", index: analyzers.length, total: analyzers.length });
-    const { report } = await lens.combine(findings);
+    // The image size lets the explanation say where in the picture a
+    // flagged area is ("in the upper right").
+    const { report } = await lens.combine({ findings, width: imageInfo?.width, height: imageInfo?.height });
     post({ type: "done", report, image: imageInfo, analyzers, timings });
   } catch (error) {
     post({ type: "error", message: error?.message ?? String(error) });
