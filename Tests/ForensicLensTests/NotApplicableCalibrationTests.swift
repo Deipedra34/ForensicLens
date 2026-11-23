@@ -28,6 +28,10 @@ final class NotApplicableCalibrationTests: XCTestCase {
             ("No duplicated regions detected.", 0, .clean),
             ("Noise level is consistent across all 16 analyzed block(s) (typical noise 2.1 gray levels).", 0, .clean),
             ("2 region(s) flagged.", 45, .flagged),
+            ("1 weak block.", 1, .flagged),
+            // Below one point: shown as 0/100 everywhere, so not a signal.
+            ("No cross-quality-consistent error-level anomalies detected (mean 0.0).", 0.4, .clean),
+            ("Image is too small for a CFA consistency check.", 0.2, .notAssessed),
         ]
         for (summary, score, expected) in cases {
             XCTAssertEqual(DetectorStatus.classify(finding("x", score: score, summary)), expected, summary)

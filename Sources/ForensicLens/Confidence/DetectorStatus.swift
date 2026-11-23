@@ -9,7 +9,8 @@
 /// latter is evidence. This reads that distinction from the existing
 /// findings without changing what any analyzer reports.
 public enum DetectorStatus: String, Sendable, Codable, CaseIterable {
-    /// The analyzer examined the image and scored something (score > 0).
+    /// The analyzer examined the image and scored something (at least
+    /// `flaggedScoreThreshold`).
     case flagged
     /// The analyzer examined the image and found nothing unusual.
     case clean
@@ -33,17 +34,18 @@ public enum DetectorStatus: String, Sendable, Codable, CaseIterable {
     /// The status of `finding`.
     ///
     /// The rule, in order: a summary starting with "Could not run" (the
-    /// engine's wording for an analyzer that threw) is `failed`; any score
-    /// above 0 is `flagged`; a score-0 summary using one of the analyzers'
-    /// not-applicable phrasings is `notApplicable`, one using a
-    /// not-assessed phrasing (too small, nothing to compare, not assessed,
-    /// ...) is `notAssessed`; anything else is `clean`.
+    /// engine's wording for an analyzer that threw) is `failed`; a score of
+    /// at least `flaggedScoreThreshold` is `flagged`; otherwise a summary
+    /// using one of the analyzers' not-applicable phrasings is
+    /// `notApplicable`, one using a not-assessed phrasing (too small,
+    /// nothing to compare, not assessed, ...) is `notAssessed`, and anything
+    /// else is `clean`.
     public static func classify(_ finding: AnalyzerFinding) -> DetectorStatus {
         let summary = finding.summary.lowercased()
         if summary.hasPrefix("could not run") {
             return .failed
         }
-        if finding.score > 0 {
+        if finding.score >= flaggedScoreThreshold {
             return .flagged
         }
         if notApplicableMarkers.contains(where: { summary.contains($0) }) {
@@ -54,6 +56,13 @@ public enum DetectorStatus: String, Sendable, Codable, CaseIterable {
         }
         return .clean
     }
+
+    /// The lowest score that counts as flagging something. Some analyzers
+    /// report a tiny positive score alongside a summary that says nothing
+    /// was detected (ELA's error-level blend, for one). Anything below this
+    /// is shown as 0/100 in every report, so it's treated as clean rather
+    /// than as a signal the narrative would have to explain.
+    public static let flaggedScoreThreshold = 0.5
 
     /// Phrases analyzers use when they don't apply to an input.
     static let notApplicableMarkers = ["not applicable", "does not carry exif", "nothing to analyze"]
